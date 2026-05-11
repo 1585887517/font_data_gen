@@ -1,0 +1,185 @@
+import random
+import os
+import shutil
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
+
+from tools.logger import Logger
+from tools.augmentations import Augmentations as A
+from tools.io_utils import IOUtils as IO
+from tools.split_dataset import split_dataset
+
+_CFG = None
+_GEN = None
+_HW = None
+
+
+def init_worker(cfg, gen_cls, hw_cls):
+    global _CFG, _GEN, _HW
+
+    _CFG = cfg
+    _GEN = gen_cls(cfg)
+    _HW = hw_cls(cfg)
+
+
+# ==================================================
+# 🚀 worker（必须在全局，避免 multiprocessing pickle 问题）
+# ==================================================
+def worker(task):
+
+    import random
+    import numpy as np
+
+    random.seed(task["seed"])
+    np.random.seed(task["seed"])
+
+    cfg = _CFG
+    gen = _GEN
+    hw = _HW
+
+    img, mask = gen.build()
+
+    overlay_min, overlay_max = cfg.HANDWRITING_OVERLAYS_PER_IMAGE
+    overlay_count = random.randint(overlay_min, overlay_max)
+
+    for _ in range(overlay_count):
+        img, mask = hw.overlay_by_source(img, mask, task["source"])
+
+    extra_count = 0
+    while (
+        (
+            (mask > 0).mean() < cfg.MIN_FOREGROUND_RATIO
+            or (mask == 2).mean() < cfg.MIN_HANDWRITING_RATIO
+        )
+        and extra_count < 6
+    ):
+        img, mask = hw.overlay_by_source(img, mask, task["source"])
+        extra_count += 1
+
+    r = random.random()
+
+    if r < 0.45:
+        img, mask = A.rotate(img, mask)
+    elif r < 0.9:
+        img, mask = A.perspective(img, mask)
+
+    if cfg.ENABLE_SCAN_NOISE:
+        img, mask = A.scan_noise(img, mask, phone_effects=cfg.ENABLE_PHONE_EFFECTS)
+
+    IO.save(img, mask, task["name"], cfg)
+
+    return task["id"]
+
+
+# ==================================================
+# 🚀 Pipeline
+# ==================================================
+class DatasetPipeline:
+
+    def __init__(self, cfg, gen_cls, hw_cls):
+
+        self.cfg = cfg
+        self.gen_cls = gen_cls
+        self.hw_cls = hw_cls
+
+        os.makedirs(cfg.OUTPUT_IMG, exist_ok=True)
+        os.makedirs(cfg.OUTPUT_MASK, exist_ok=True)
+
+    # ==================================================
+    # 🚀 run entry
+    # ==================================================
+    def run(self):
+
+        total = self.cfg.NUM_SAMPLES
+
+        iam_n = total // 2
+        casia_n = total - iam_n
+
+        if self.cfg.CLEAN_OUTPUT:
+            self._clean_outputs()
+
+        tasks = self._build_tasks(iam_n, casia_n)
+
+        worker_count = min(self.cfg.NUM_WORKERS, max(1, len(tasks)))
+
+        Logger.info(f"[pipeline] total={len(tasks)} workers={worker_count}")
+
+        # ==================================================
+        # 🚀 multiprocessing execution
+        # ==================================================
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            initializer=init_worker,
+            initargs=(self.cfg, self.gen_cls, self.hw_cls)
+        ) as executor:
+
+            list(tqdm(
+                executor.map(worker, tasks),
+                total=len(tasks),
+                desc="generating"
+            ))
+
+        # ==================================================
+        # 🚀 dataset split
+        # ==================================================
+        split_dataset(
+            img_dir=self.cfg.OUTPUT_IMG,
+            mask_dir=self.cfg.OUTPUT_MASK,
+            out_dir=self.cfg.OUTPUT_DIR,
+            train_ratio=self.cfg.TRAIN_RATIO,
+            val_ratio=self.cfg.VAL_RATIO,
+            test_ratio=self.cfg.TEST_RATIO,
+            seed=self.cfg.RANDOM_SEED,
+            clean=True
+        )
+
+        Logger.info("[pipeline] done")
+
+    # ==================================================
+    # 🚀 build tasks
+    # ==================================================
+    def _build_tasks(self, iam_n, casia_n):
+
+        tasks = []
+        rng = random.Random(self.cfg.RANDOM_SEED)
+
+        # --------------------------------------------------
+        # iam tasks
+        # --------------------------------------------------
+        for i in range(iam_n):
+
+            tasks.append({
+                "id": f"iam_{i}",
+                "source": "iam",
+                "seed": rng.randint(0, 10**9),
+                "name": f"iam_{i}",
+            })
+
+        # --------------------------------------------------
+        # casia tasks
+        # --------------------------------------------------
+        for i in range(casia_n):
+
+            tasks.append({
+                "id": f"casia_{i}",
+                "source": "casia",
+                "seed": rng.randint(0, 10**9),
+                "name": f"casia_{i}",
+            })
+
+        rng.shuffle(tasks)
+
+        return tasks
+
+    def _clean_outputs(self):
+
+        for path in [
+            self.cfg.OUTPUT_IMG,
+            self.cfg.OUTPUT_MASK,
+            self.cfg.OUTPUT_DIR,
+        ]:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            os.makedirs(path, exist_ok=True)
+
+        Logger.info("[pipeline] cleaned previous generated output")
