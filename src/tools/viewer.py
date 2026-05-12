@@ -32,8 +32,8 @@ class Viewer(QWidget):
             )
         )
 
-        self.img_dir = os.path.join(base_dir, "output/images")
-        self.mask_dir = os.path.join(base_dir, "output/masks")
+        self.img_dir = os.path.join(base_dir, "output/v3/images")
+        self.mask_dir = os.path.join(base_dir, "output/v3/masks")
 
         def extract_num(x):
             nums = re.findall(r"\d+", x)
@@ -138,17 +138,19 @@ class Viewer(QWidget):
         print("==============================\n")
 
         # ==================================================
-        # mask overlay
+        # mask visualization
         # ==================================================
-        color = np.zeros_like(img)
+        mask_color = np.zeros_like(img)
 
-        color[mask == 1] = [0, 255, 0]
-        color[mask == 2] = [0, 0, 255]
-
-        overlay = cv2.addWeighted(img, 0.7, color, 0.3, 0)
+        # 类别 0：背景
+        mask_color[mask == 0] = [0, 0, 0]
+        # 类别 1：印刷体文字
+        mask_color[mask == 1] = [0, 255, 0]
+        # 类别 2：手写体文字
+        mask_color[mask == 2] = [0, 0, 255]
 
         self.show_img(self.img_label, img)
-        self.show_img(self.mask_label, overlay)
+        self.show_img(self.mask_label, mask_color)
 
     # ==================================================
     # cv2 -> Qt

@@ -12,13 +12,15 @@ from tools.split_dataset import split_dataset
 _CFG = None
 _GEN = None
 _HW = None
+_TL = None
 
 
-def init_worker(cfg, gen_cls, hw_cls):
-    global _CFG, _GEN, _HW
+def init_worker(cfg, gen_cls, hw_cls, text_loader_cls=None):
+    global _CFG, _GEN, _HW, _TL
 
     _CFG = cfg
-    _GEN = gen_cls(cfg)
+    _TL = text_loader_cls(cfg) if text_loader_cls else None
+    _GEN = gen_cls(cfg, _TL)
     _HW = hw_cls(cfg)
 
 
@@ -47,13 +49,11 @@ def worker(task):
 
     extra_count = 0
     while (
-        (
-            (mask > 0).mean() < cfg.MIN_FOREGROUND_RATIO
-            or (mask == 2).mean() < cfg.MIN_HANDWRITING_RATIO
-        )
+        (mask > 0).mean() < cfg.MIN_FOREGROUND_RATIO
         and extra_count < 6
     ):
-        img, mask = hw.overlay_by_source(img, mask, task["source"])
+        # 如果前景不够，尝试重新生成文档（这里简化处理，实际可以调用gen.build()重新生成）
+        img, mask = gen.build()
         extra_count += 1
 
     r = random.random()
@@ -76,11 +76,12 @@ def worker(task):
 # ==================================================
 class DatasetPipeline:
 
-    def __init__(self, cfg, gen_cls, hw_cls):
+    def __init__(self, cfg, gen_cls, hw_cls, text_loader_cls=None):
 
         self.cfg = cfg
         self.gen_cls = gen_cls
         self.hw_cls = hw_cls
+        self.text_loader_cls = text_loader_cls
 
         os.makedirs(cfg.OUTPUT_IMG, exist_ok=True)
         os.makedirs(cfg.OUTPUT_MASK, exist_ok=True)
@@ -110,7 +111,7 @@ class DatasetPipeline:
         with ProcessPoolExecutor(
             max_workers=worker_count,
             initializer=init_worker,
-            initargs=(self.cfg, self.gen_cls, self.hw_cls)
+            initargs=(self.cfg, self.gen_cls, self.hw_cls, self.text_loader_cls)
         ) as executor:
 
             list(tqdm(

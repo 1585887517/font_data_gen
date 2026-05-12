@@ -3,6 +3,7 @@ import time
 from configs.config import Config
 from generators.document_generator import DocumentGenerator
 from generators.handwriting_loader import HandwritingLoader
+from generators.text_loader import TextLoader
 from pipeline.dataset_pipeline import DatasetPipeline
 from tools.dataset_metadata import build_dataset_metadata
 from tools.logger import Logger
@@ -16,7 +17,7 @@ def main():
     cfg.init_dirs()
     cfg.print_config()
 
-    pipe = DatasetPipeline(cfg, DocumentGenerator, HandwritingLoader)
+    pipe = DatasetPipeline(cfg, DocumentGenerator, HandwritingLoader, TextLoader)
 
     start_time = time.time()
     pipe.run()

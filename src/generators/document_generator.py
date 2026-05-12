@@ -3,16 +3,22 @@ from PIL import Image, ImageDraw, ImageFont
 import cv2
 import os
 import random
+from collections import defaultdict
 
 
 class DocumentGenerator:
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, text_loader=None):
 
         self.cfg = cfg
+        self.text_loader = text_loader
+        self.external_texts = text_loader.texts if text_loader else []
+        self.external_categories = text_loader.category_texts if text_loader else defaultdict(list)
 
         self.font_paths = self._discover_fonts()
-        self.font_sizes = [18, 22, 26, 30, 34, 38, 42, 48]
+        self.dpi = self._compute_dpi()
+        self.font_point_sizes = [9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40]
+        self.font_sizes = sorted({self._pt_to_px(pt) for pt in self.font_point_sizes})
         self.font_cache = {}
         for font_path in self.font_paths:
             for size in self.font_sizes:
@@ -45,6 +51,31 @@ class DocumentGenerator:
             "This document is machine generated"
         ]
 
+        self.english_fragments = [
+            "review", "approved", "section", "document", "invoice", "payment",
+            "details", "delivery", "total", "report", "reference", "customer",
+            "address", "purchase", "order", "summary", "account", "service",
+            "invoice", "statement", "condition", "agreement", "support", "information",
+            "recommendation", "schedule", "quantity", "description", "balance", "date"
+        ]
+
+        self.chinese_fragments = [
+            "客户", "合同", "金额", "日期", "地址", "邮编", "电话", "部门", "经理", "审核",
+            "发票", "订单", "凭证", "备注", "收款", "单位", "项目", "编号", "审批", "签字",
+            "报告", "样品", "规格", "型号", "数量", "单价", "合计", "发货", "收货", "付款"
+        ]
+
+        self.receipt_items = [
+            "Office Supplies", "Hardware Kit", "Repair Service", "Consulting Fee",
+            "Training Session", "Monthly Subscription", "Shipping Charge", "Tax Amount",
+            "Paper Ream", "Ink Cartridge", "Software License", "Inspection Fee"
+        ]
+
+        self.company_names = [
+            "Shanghai AI Tech Co.", "Beijing Logistics Ltd.", "Guangzhou Trading Co.",
+            "深圳创新科技有限公司", "杭州供应链管理公司", "苏州制造有限公司"
+        ]
+
 
     def _discover_fonts(self):
 
@@ -61,11 +92,95 @@ class DocumentGenerator:
         return font_paths
 
 
-    def _font(self, size):
+    def _compute_dpi(self):
+        # A4 纸张尺寸：210mm x 297mm ≈ 8.27in x 11.69in
+        return self.cfg.WIDTH / 8.27
 
-        nearest_size = min(self.font_sizes, key=lambda s: abs(s - size))
+
+    def _pt_to_px(self, pt):
+        return int(round(pt * self.dpi / 72.0))
+
+
+    def _font(self, pt_size):
+
+        px_size = self._pt_to_px(pt_size)
+        nearest_size = min(self.font_sizes, key=lambda s: abs(s - px_size))
         font_path = random.choice(self.font_paths)
         return self.font_cache[(font_path, nearest_size)]
+
+
+    def _get_external_text(self, min_words, max_words, chinese, category=None):
+
+        if not self.text_loader:
+            return None
+
+        sample = self.text_loader.sample(category=category)
+        if not sample:
+            return None
+
+        text = sample.strip()
+        if not text:
+            return None
+
+        if chinese:
+            clean = text.replace(" ", "")
+            if len(clean) <= min_words:
+                return clean
+            start = random.randint(0, max(0, len(clean) - min_words))
+            end = min(len(clean), start + random.randint(min_words, max_words))
+            return clean[start:end]
+
+        words = text.split()
+        if len(words) <= min_words:
+            return text
+        start = random.randint(0, max(0, len(words) - min_words))
+        end = min(len(words), start + random.randint(min_words, max_words))
+        return " ".join(words[start:end])
+
+
+    def _build_text(self, min_words=3, max_words=10, chinese=None, category=None):
+
+        if self.text_loader and random.random() < 0.38:
+            external = self._get_external_text(
+                min_words,
+                max_words,
+                chinese if chinese is not None else random.random() < 0.5,
+                category=category
+            )
+            if external:
+                return external
+
+        if random.random() < 0.28:
+            return random.choice(self.texts)
+
+        if chinese is None:
+            chinese = random.random() < 0.5
+
+        if chinese:
+            count = random.randint(min_words, max_words)
+            return "".join(random.choices(self.chinese_fragments, k=count))
+
+        words = random.choices(self.english_fragments, k=random.randint(min_words, max_words))
+        text = " ".join(words)
+        if random.random() < 0.35:
+            text = text.capitalize()
+        if random.random() < 0.2:
+            text += random.choice([".", ".", ""])
+        return text
+
+
+    def _build_receipt_line(self):
+
+        if self.text_loader and random.random() < 0.45:
+            receipt_text = self.text_loader.sample(category="receipt")
+            if receipt_text:
+                return receipt_text
+
+        if random.random() < 0.4:
+            return random.choice(self.receipt_items)
+        if random.random() < 0.5:
+            return random.choice(self.company_names)
+        return self._build_text(2, 6, chinese=False, category="receipt")
 
 
     # ==================================================
@@ -96,6 +211,9 @@ class DocumentGenerator:
             (self.cfg.HEIGHT, self.cfg.WIDTH),
             dtype=np.uint8
         )
+
+        # 用于避免印刷体文字重叠
+        self._occupied = np.zeros_like(mask, dtype=np.uint8)
 
         prob_total = (
             self.cfg.FORM_LAYOUT_PROB
@@ -129,20 +247,20 @@ class DocumentGenerator:
 
     def _draw_free_printed_text(self, draw, mask):
 
-        y = random.randint(22, 76)
+        y = random.randint(24, 80)
 
-        line_count = random.randint(10, 28)
+        line_count = random.randint(16, 32)
         columns = random.choice([1, 1, 2])
-        column_x = [random.randint(24, 80)]
+        column_x = [random.randint(28, 80)]
         if columns == 2:
             column_x.append(random.randint(self.cfg.WIDTH // 2, self.cfg.WIDTH // 2 + 60))
 
         for _ in range(line_count):
 
-            text = random.choice(self.texts)
-            font = self._font(random.choice([22, 26, 30, 34, 38]))
+            text = self._build_text(min_words=4, max_words=12, category="general")
+            font = self._font(random.choice([11, 12, 13, 14, 16]))
 
-            x = random.choice(column_x) + random.randint(0, 36)
+            x = random.choice(column_x) + random.randint(0, 24)
 
             # ==================================================
             # 🚀 模拟打印深浅（关键）
@@ -160,10 +278,10 @@ class DocumentGenerator:
 
             text_h = bbox[3] - bbox[1]
 
-            y += text_h + random.randint(6, 30)
+            y += text_h + random.randint(8, 18)
 
             if y > self.cfg.HEIGHT - 70 and columns == 2 and len(column_x) == 2:
-                y = random.randint(28, 70)
+                y = random.randint(32, 72)
                 column_x.pop(0)
             elif y > self.cfg.HEIGHT - 60:
                 break
@@ -171,9 +289,9 @@ class DocumentGenerator:
 
     def _draw_structured_printed_text(self, draw, mask):
 
-        title_font = self._font(random.choice([38, 42, 48]))
-        label_font = self._font(random.choice([22, 26, 30]))
-        body_font = self._font(random.choice([22, 26, 30]))
+        title_font = self._font(random.choice([18, 20, 22, 24]))
+        label_font = self._font(random.choice([11, 12, 13, 14]))
+        body_font = self._font(random.choice([11, 12, 13, 14]))
 
         title = random.choice([
             "费用报销单",
@@ -209,7 +327,7 @@ class DocumentGenerator:
         rows = random.randint(5, 11)
 
         for r in range(rows):
-            y = y0 + r * row_h + random.randint(7, 13)
+            y = y0 + r * row_h + random.randint(6, 12)
             for c in range(0, 4, 2):
                 x = x0 + sum(col_w[:c]) + 12
                 text = random.choice(fields) + ":"
@@ -222,14 +340,14 @@ class DocumentGenerator:
                     (random.randint(15, 85),) * 3
                 )
 
-        paragraph_y = y0 + rows * row_h + random.randint(22, 34)
+        paragraph_y = y0 + rows * row_h + random.randint(18, 26)
         for i in range(random.randint(3, 6)):
-            text = random.choice(self.texts)
+            text = self._build_text(min_words=5, max_words=14, category="form")
             self._draw_printed_text(
                 draw,
                 mask,
                 text,
-                (random.randint(75, 130), paragraph_y + i * random.randint(34, 42)),
+                (random.randint(75, 130), paragraph_y + i * random.randint(26, 34)),
                 body_font,
                 (random.randint(20, 90),) * 3
             )
@@ -237,9 +355,9 @@ class DocumentGenerator:
 
     def _draw_receipt_layout(self, draw, mask):
 
-        title_font = self._font(random.choice([30, 34, 38]))
-        item_font = self._font(random.choice([18, 22, 26]))
-        total_font = self._font(random.choice([26, 30, 34]))
+        title_font = self._font(random.choice([14, 16, 18, 20]))
+        item_font = self._font(random.choice([10, 11, 12, 13]))
+        total_font = self._font(random.choice([16, 18, 20, 22]))
 
         x0 = random.randint(145, 230)
         width = random.randint(450, 650)
@@ -257,9 +375,9 @@ class DocumentGenerator:
 
         y += random.randint(42, 58)
         for _ in range(random.randint(12, 24)):
-            left = random.choice(self.texts)
-            amount = random.choice(["12.00", "35.80", "108.50", "1,245.00", "Qty 2", "OK"])
-            left_len = random.randint(min(4, len(left)), min(len(left), 28))
+            left = self._build_receipt_line()
+            amount = random.choice(["12.00", "35.80", "108.50", "1,245.00", "Qty 2", "OK", "128.00", "999.00"])
+            left_len = random.randint(4, min(len(left), 28))
             self._draw_printed_text(
                 draw,
                 mask,
@@ -304,13 +422,6 @@ class DocumentGenerator:
 
     def _draw_printed_text(self, draw, mask, text, xy, font, color):
 
-        draw.text(
-            xy,
-            text,
-            fill=color,
-            font=font
-        )
-
         bbox = draw.textbbox(xy, text, font=font)
         pad = 3
         x0 = max(0, bbox[0] - pad)
@@ -319,7 +430,7 @@ class DocumentGenerator:
         y1 = min(self.cfg.HEIGHT, bbox[3] + pad)
 
         if x1 <= x0 or y1 <= y0:
-            return
+            return False
 
         text_mask_img = Image.new(
             "L",
@@ -337,8 +448,24 @@ class DocumentGenerator:
         )
 
         text_mask = np.array(text_mask_img)
+        occupied_area = self._occupied[y0:y1, x0:x1]
+        overlap = occupied_area & (text_mask > 32)
+
+        if np.any(overlap):
+            return False
+
+        draw.text(
+            xy,
+            text,
+            fill=color,
+            font=font
+        )
+
         blur_mask = cv2.GaussianBlur(text_mask, (3, 3), 0)
         mask[y0:y1, x0:x1][blur_mask > 32] = 1
+        self._occupied[y0:y1, x0:x1][text_mask > 32] = 1
+
+        return True
 
 
     def _draw_form_layout(self, draw):

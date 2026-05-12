@@ -1,0 +1,69 @@
+# PaddleSeg batch_size is per GPU. Use a moderate per-GPU batch size for
+# two RTX 5090 cards with other programs running, and increase iterations for
+# better accuracy on a segmentation task.
+batch_size: 10
+iters: 60000
+
+train_dataset:
+  type: Dataset
+  dataset_root: /home/shixian/doc_seg_project/output/v3/dataset
+  train_path: /home/shixian/doc_seg_project/output/v3/dataset/train.txt
+  num_classes: 3
+  mode: train
+  transforms:
+    - type: ResizeStepScaling
+      min_scale_factor: 0.5
+      max_scale_factor: 1.75
+      scale_step_size: 0.1
+    - type: RandomPaddingCrop
+      crop_size: [960, 1358]
+      im_padding_value: 255
+      label_padding_value: 255
+      category_max_ratio: 0.85
+    - type: RandomDistort
+      brightness_range: 0.22
+      contrast_range: 0.22
+      saturation_range: 0.10
+    - type: Normalize
+      mean: [127.5, 127.5, 127.5]
+      std: [127.5, 127.5, 127.5]
+
+val_dataset:
+  type: Dataset
+  dataset_root: /home/shixian/doc_seg_project/output/v3/dataset
+  val_path: /home/shixian/doc_seg_project/output/v3/dataset/val.txt
+  num_classes: 3
+  mode: val
+  transforms:
+    - type: Normalize
+      mean: [127.5, 127.5, 127.5]
+      std: [127.5, 127.5, 127.5]
+
+optimizer:
+  type: SGD
+  momentum: 0.9
+  weight_decay: 4.0e-5
+
+lr_scheduler:
+  type: PolynomialDecay
+  learning_rate: 0.001
+  end_lr: 1.0e-5
+  power: 0.9
+  warmup_iters: 1000
+  warmup_start_lr: 1.0e-5
+
+loss:
+  types:
+    - type: CrossEntropyLoss
+      weight: [0.2, 2.0, 4.0]
+      top_k_percent_pixels: 0.35
+  coef: [1, 1, 1]
+
+model:
+  type: PPLiteSeg
+  # Replace this with the existing segmentation weights on the Ubuntu server.
+  # Example: /home/shixian/doc_seg_project/pretrained/best_model/model.pdparams
+  pretrained: /home/shixian/doc_seg_project/pretrained/best_model/model.pdparams
+  backbone:
+    type: STDC2
+    pretrained:

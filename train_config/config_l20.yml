@@ -1,0 +1,67 @@
+# PaddleSeg batch_size is per GPU. For 4x L20 cards with ~46GB each,
+# this config uses a moderately large per-GPU batch while leaving space
+# for other processes and focusing on high-accuracy segmentation.
+batch_size: 12
+iters: 80000
+
+train_dataset:
+  type: Dataset
+  dataset_root: /home/shixian/doc_seg_project/output/v3/dataset
+  train_path: /home/shixian/doc_seg_project/output/v3/dataset/train.txt
+  num_classes: 3
+  mode: train
+  transforms:
+    - type: ResizeStepScaling
+      min_scale_factor: 0.5
+      max_scale_factor: 1.75
+      scale_step_size: 0.1
+    - type: RandomPaddingCrop
+      crop_size: [960, 1358]
+      im_padding_value: 255
+      label_padding_value: 255
+      category_max_ratio: 0.85
+    - type: RandomDistort
+      brightness_range: 0.18
+      contrast_range: 0.18
+      saturation_range: 0.08
+    - type: Normalize
+      mean: [127.5, 127.5, 127.5]
+      std: [127.5, 127.5, 127.5]
+
+val_dataset:
+  type: Dataset
+  dataset_root: /home/shixian/doc_seg_project/output/v3/dataset
+  val_path: /home/shixian/doc_seg_project/output/v3/dataset/val.txt
+  num_classes: 3
+  mode: val
+  transforms:
+    - type: Normalize
+      mean: [127.5, 127.5, 127.5]
+      std: [127.5, 127.5, 127.5]
+
+optimizer:
+  type: SGD
+  momentum: 0.9
+  weight_decay: 4.0e-5
+
+lr_scheduler:
+  type: PolynomialDecay
+  learning_rate: 0.001
+  end_lr: 1.0e-5
+  power: 0.9
+  warmup_iters: 1000
+  warmup_start_lr: 1.0e-5
+
+loss:
+  types:
+    - type: CrossEntropyLoss
+      weight: [0.2, 2.0, 4.0]
+      top_k_percent_pixels: 0.35
+  coef: [1, 1, 1]
+
+model:
+  type: PPLiteSeg
+  pretrained: /home/shixian/doc_seg_project/pretrained/best_model/model.pdparams
+  backbone:
+    type: STDC2
+    pretrained:

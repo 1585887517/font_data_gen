@@ -42,12 +42,12 @@ class Config:
     # ==================================================
     # 🚀 dataset version
     # ==================================================
-    DATASET_NAME = "dataset_v2"
+    DATASET_NAME = "dataset"
 
     # ==================================================
     # 🚀 output
     # ==================================================
-    OUTPUT_ROOT = os.path.join(PROJECT_ROOT, "output")
+    OUTPUT_ROOT = os.path.join(PROJECT_ROOT, "output/v3")
 
     OUTPUT_IMG = os.path.join(OUTPUT_ROOT, "images")
     OUTPUT_MASK = os.path.join(OUTPUT_ROOT, "masks")
@@ -79,10 +79,17 @@ class Config:
     )
 
     # ==================================================
+    # 🚀 open text corpus
+    # ==================================================
+    TEXT_ROOT = os.path.join(PROJECT_ROOT, "data", "text")
+    TEXT_FILE_EXTENSIONS = (".txt",)
+
+    # ==================================================
     # 🚀 image config
     # ==================================================
+    # A4 比例参考，纵向纸张更符合文档场景
     WIDTH = 960
-    HEIGHT = 720
+    HEIGHT = 1358
 
     CHANNELS = 3
 
@@ -105,9 +112,9 @@ class Config:
     CLEAN_OUTPUT = True
 
     # 前景太稀会让 printed/handwriting 的 IoU 很不稳定
-    HANDWRITING_OVERLAYS_PER_IMAGE = (3, 6)
+    HANDWRITING_OVERLAYS_PER_IMAGE = (0, 0)
     MIN_FOREGROUND_RATIO = 0.08
-    MIN_HANDWRITING_RATIO = 0.035
+    MIN_HANDWRITING_RATIO = 0.0
 
     # 版式不要过于模板化，否则模型会记住表格位置而不是文字外观
     FORM_LAYOUT_PROB = 0.45
@@ -151,6 +158,7 @@ class Config:
             cls.CASIA_RGBA_DIR,
 
             cls.FONT_ROOT,
+            cls.TEXT_ROOT,
         ]
 
         for d in dirs:
