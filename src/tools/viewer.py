@@ -46,10 +46,6 @@ class Viewer(QWidget):
 
         self.i = 0
 
-        print("IMG DIR:", self.img_dir)
-        print("MASK DIR:", self.mask_dir)
-        print("NUM IMGS:", len(self.imgs))
-
         self.init_ui()
         self.load_current()
 
@@ -63,9 +59,12 @@ class Viewer(QWidget):
 
         self.img_label = QLabel()
         self.mask_label = QLabel()
+        self.stats_label = QLabel()
 
         self.img_label.setAlignment(Qt.AlignCenter)
         self.mask_label.setAlignment(Qt.AlignCenter)
+        self.stats_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.stats_label.setWordWrap(True)
 
         self.prev_btn = QPushButton("Previous")
         self.next_btn = QPushButton("Next")
@@ -85,6 +84,7 @@ class Viewer(QWidget):
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(top_layout)
+        main_layout.addWidget(self.stats_label)
         main_layout.addLayout(btn_layout)
 
         self.setLayout(main_layout)
@@ -101,41 +101,34 @@ class Viewer(QWidget):
         mask_name = os.path.splitext(name)[0] + ".png"
         mask_path = os.path.join(self.mask_dir, mask_name)
 
-        # =========================
-        # 🚀 DEBUG 1：路径检查
-        # =========================
-        print("\n==============================")
-        print(f"INDEX: {self.i}/{len(self.imgs)}")
-        print("NAME:", name)
-        print("IMG PATH:", img_path)
-        print("MASK PATH:", mask_path)
-
-        print("IMG EXISTS:", os.path.exists(img_path))
-        print("MASK EXISTS:", os.path.exists(mask_path))
-
-        # =========================
-        # 🚀 DEBUG 2：读取文件
-        # =========================
         img = cv2.imread(img_path)
         mask = cv2.imread(mask_path, 0)
 
-        print("IMG IS NONE:", img is None)
-        print("MASK IS NONE:", mask is None)
-
-        if img is None:
-            print("❌ IMAGE LOAD FAILED:", img_path)
+        if img is None or mask is None:
+            self.stats_label.setText("Failed to load image or mask.")
             return
 
-        if mask is None:
-            print("❌ MASK LOAD FAILED:", mask_path)
-            return
+        unique, counts = np.unique(mask, return_counts=True)
+        total_pixels = mask.size
 
-        # =========================
-        # 🚀 DEBUG 3：mask统计信息
-        # =========================
-        print("MASK UNIQUE VALUES:", np.unique(mask))
-        print("MASK SHAPE:", mask.shape)
-        print("==============================\n")
+        stats_lines = [
+            f"Index: {self.i + 1}/{len(self.imgs)}",
+            f"Name: {name}",
+            f"Image shape: {img.shape}",
+            f"Mask shape: {mask.shape}",
+            "Mask values:"
+        ]
+        for value, count in zip(unique, counts):
+            stats_lines.append(
+                f"  value={value}: {count} pixels, ratio={count / total_pixels:.6f}"
+            )
+        invalid_values = [v for v in unique if v not in (0, 1, 2)]
+        if invalid_values:
+            stats_lines.append(f"Invalid values: {invalid_values}")
+        else:
+            stats_lines.append("Invalid values: none")
+
+        self.stats_label.setText("\n".join(stats_lines))
 
         # ==================================================
         # mask visualization

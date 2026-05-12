@@ -377,7 +377,11 @@ class DocumentGenerator:
         for _ in range(random.randint(12, 24)):
             left = self._build_receipt_line()
             amount = random.choice(["12.00", "35.80", "108.50", "1,245.00", "Qty 2", "OK", "128.00", "999.00"])
-            left_len = random.randint(4, min(len(left), 28))
+            if not left:
+                continue
+            max_len = min(len(left), 28)
+            min_len = min(4, max_len)
+            left_len = random.randint(min_len, max_len)
             self._draw_printed_text(
                 draw,
                 mask,
