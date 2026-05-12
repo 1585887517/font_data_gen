@@ -100,7 +100,7 @@ class Config:
     # ==================================================
     # 🚀 dataset config
     # ==================================================
-    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "60"))
+    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "40000"))
 
     TRAIN_RATIO = 0.7
     VAL_RATIO = 0.2
