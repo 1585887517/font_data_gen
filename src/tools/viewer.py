@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 import re
+import argparse
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -18,22 +19,12 @@ from PyQt5.QtCore import Qt
 
 class Viewer(QWidget):
 
-    def __init__(self):
+    def __init__(self, img_dir, mask_dir):
 
         super().__init__()
 
-        # ==================================================
-        # 🚀 自动定位项目根目录
-        # ==================================================
-        base_dir = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__),
-                "../../"
-            )
-        )
-
-        self.img_dir = os.path.join(base_dir, "output/v3/images")
-        self.mask_dir = os.path.join(base_dir, "output/v3/masks")
+        self.img_dir = img_dir
+        self.mask_dir = mask_dir
 
         def extract_num(x):
             nums = re.findall(r"\d+", x)
@@ -197,9 +188,25 @@ class Viewer(QWidget):
 # ==================================================
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser(description="Dataset Viewer")
+    parser.add_argument('--dir', required=True, help='Dataset root directory containing images/ and masks/ subdirectories')
+
+    args = parser.parse_args()
+
+    img_dir = os.path.join(args.dir, 'images')
+    mask_dir = os.path.join(args.dir, 'masks')
+
+    if not os.path.exists(img_dir):
+        print(f"Error: Images directory not found: {img_dir}")
+        exit(1)
+
+    if not os.path.exists(mask_dir):
+        print(f"Error: Masks directory not found: {mask_dir}")
+        exit(1)
+
     app = QApplication([])
 
-    viewer = Viewer()
+    viewer = Viewer(img_dir, mask_dir)
 
     viewer.show()
 

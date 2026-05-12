@@ -215,22 +215,23 @@ class DocumentGenerator:
         # 用于避免印刷体文字重叠
         self._occupied = np.zeros_like(mask, dtype=np.uint8)
 
-        prob_total = (
-            self.cfg.FORM_LAYOUT_PROB
-            + self.cfg.RECEIPT_LAYOUT_PROB
-            + self.cfg.FREE_LAYOUT_PROB
-        )
-        layout_roll = random.random() * prob_total
-        form_prob = self.cfg.FORM_LAYOUT_PROB
-        receipt_prob = self.cfg.RECEIPT_LAYOUT_PROB
+        if self.cfg.DATASET_MODE != "handwriting_only":
+            prob_total = (
+                self.cfg.FORM_LAYOUT_PROB
+                + self.cfg.RECEIPT_LAYOUT_PROB
+                + self.cfg.FREE_LAYOUT_PROB
+            )
+            layout_roll = random.random() * prob_total
+            form_prob = self.cfg.FORM_LAYOUT_PROB
+            receipt_prob = self.cfg.RECEIPT_LAYOUT_PROB
 
-        if self.cfg.ENABLE_FORM_LAYOUT and layout_roll < form_prob:
-            self._draw_form_layout(draw)
-            self._draw_structured_printed_text(draw, mask)
-        elif layout_roll < form_prob + receipt_prob:
-            self._draw_receipt_layout(draw, mask)
-        else:
-            self._draw_free_printed_text(draw, mask)
+            if self.cfg.ENABLE_FORM_LAYOUT and layout_roll < form_prob:
+                self._draw_form_layout(draw)
+                self._draw_structured_printed_text(draw, mask)
+            elif layout_roll < form_prob + receipt_prob:
+                self._draw_receipt_layout(draw, mask)
+            else:
+                self._draw_free_printed_text(draw, mask)
 
         # ==================================================
         # 🚀 转numpy

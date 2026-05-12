@@ -41,19 +41,32 @@ def worker(task):
 
     img, mask = gen.build()
 
-    overlay_min, overlay_max = cfg.HANDWRITING_OVERLAYS_PER_IMAGE
-    overlay_count = random.randint(overlay_min, overlay_max)
+    overlay_count = 0
+    if cfg.DATASET_MODE == "both":
+        overlay_min, overlay_max = cfg.HANDWRITING_OVERLAYS_PER_IMAGE
+        overlay_count = random.randint(overlay_min, overlay_max)
+    elif cfg.DATASET_MODE == "handwriting_only":
+        # 为 handwriting_only 模式增加更多手写叠加
+        overlay_count = random.randint(5, 10)
 
     for _ in range(overlay_count):
         img, mask = hw.overlay_by_source(img, mask, task["source"])
 
+    min_foreground = (
+        cfg.MIN_HANDWRITING_RATIO
+        if cfg.DATASET_MODE == "handwriting_only"
+        else cfg.MIN_FOREGROUND_RATIO
+    )
+
     extra_count = 0
     while (
-        (mask > 0).mean() < cfg.MIN_FOREGROUND_RATIO
+        (mask > 0).mean() < min_foreground
         and extra_count < 6
     ):
-        # 如果前景不够，尝试重新生成文档（这里简化处理，实际可以调用gen.build()重新生成）
+        # 如果前景不够，重新生成文档并重新叠加手写，否则最终可能只剩下背景
         img, mask = gen.build()
+        for _ in range(overlay_count):
+            img, mask = hw.overlay_by_source(img, mask, task["source"])
         extra_count += 1
 
     r = random.random()

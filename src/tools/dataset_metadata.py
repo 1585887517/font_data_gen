@@ -7,20 +7,14 @@ from tools.logger import Logger
 # ==================================================
 # 🚀 create labels.txt
 # ==================================================
-def create_labels_txt(out_dir):
+def create_labels_txt(out_dir, labels):
 
     labels_path = os.path.join(
         out_dir,
         "labels.txt"
     )
 
-    labels = [
-        "background",
-        "printed_text",
-        "handwriting"
-    ]
-
-    with open(labels_path, "w") as f:
+    with open(labels_path, "w", encoding="utf-8") as f:
         for label in labels:
             f.write(label + "\n")
 
@@ -32,16 +26,13 @@ def create_labels_txt(out_dir):
 # ==================================================
 def create_dataset_info(cfg):
 
+    classes = cfg.get_dataset_classes()
     info = {
         "dataset_name": cfg.DATASET_NAME,
 
-        "num_classes": 3,
+        "num_classes": len(classes),
 
-        "classes": [
-            "background",
-            "printed_text",
-            "handwriting"
-        ],
+        "classes": classes,
 
         "image_size": {
             "width": cfg.WIDTH,
@@ -76,6 +67,7 @@ def create_dataset_info(cfg):
 # ==================================================
 def build_dataset_metadata(cfg):
 
-    create_labels_txt(cfg.OUTPUT_DIR)
+    classes = cfg.get_dataset_classes()
+    create_labels_txt(cfg.OUTPUT_DIR, classes)
 
     create_dataset_info(cfg)

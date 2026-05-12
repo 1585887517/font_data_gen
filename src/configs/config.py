@@ -47,7 +47,9 @@ class Config:
     # ==================================================
     # 🚀 output
     # ==================================================
-    OUTPUT_ROOT = os.path.join(PROJECT_ROOT, "output/v3")
+        # 数据集模式：printed_only, handwriting_only, both
+    DATASET_MODE = "both"
+    OUTPUT_ROOT = os.path.join(PROJECT_ROOT, f"output/{DATASET_MODE}")
 
     OUTPUT_IMG = os.path.join(OUTPUT_ROOT, "images")
     OUTPUT_MASK = os.path.join(OUTPUT_ROOT, "masks")
@@ -164,6 +166,15 @@ class Config:
         for d in dirs:
             os.makedirs(d, exist_ok=True)
 
+    @classmethod
+    def get_dataset_classes(cls):
+        if cls.DATASET_MODE == "printed_only":
+            return ["background", "printed_text"]
+        elif cls.DATASET_MODE == "handwriting_only":
+            return ["background", "handwriting"]
+        else:  # both
+            return ["background", "printed_text", "handwriting"]
+
     # ==================================================
     # 🚀 print config
     # ==================================================
@@ -182,6 +193,7 @@ class Config:
             "NUM_SAMPLES",
             "RANDOM_SEED",
             "CLEAN_OUTPUT",
+            "DATASET_MODE",
             "ENABLE_PAPER_TEXTURE",
             "ENABLE_FORM_LAYOUT",
             "ENABLE_PHONE_EFFECTS",
