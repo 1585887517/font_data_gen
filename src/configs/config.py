@@ -112,9 +112,9 @@ class Config:
     CLEAN_OUTPUT = True
 
     # 前景太稀会让 printed/handwriting 的 IoU 很不稳定
-    HANDWRITING_OVERLAYS_PER_IMAGE = (0, 0)
+    HANDWRITING_OVERLAYS_PER_IMAGE = (1, 3)
     MIN_FOREGROUND_RATIO = 0.08
-    MIN_HANDWRITING_RATIO = 0.0
+    MIN_HANDWRITING_RATIO = 0.02
 
     # 版式不要过于模板化，否则模型会记住表格位置而不是文字外观
     FORM_LAYOUT_PROB = 0.45

@@ -277,34 +277,49 @@ class HandwritingLoader:
         y_low = min(max(0, y_min), max(0, H - h))
         y_high = max(y_low, min(max(0, y_max), max(0, H - h)))
 
-        x = random.randint(x_low, x_high)
-        y = random.randint(y_low, y_high)
+        # ==================================================
+        # 5. avoid overlap with printed text and existing handwriting
+        # ==================================================
+        max_attempts = 16
+        success = False
+        for _ in range(max_attempts):
+            x = random.randint(x_low, x_high)
+            y = random.randint(y_low, y_high)
 
-        # ==================================================
-        # 5. FINAL CLAMP (核心修复点)
-        # ==================================================
-        actual_h = min(h, H - y)
-        actual_w = min(w, W - x)
+            actual_h = min(h, H - y)
+            actual_w = min(w, W - x)
+            if actual_h <= 0 or actual_w <= 0:
+                continue
+
+            alpha_crop = alpha[:actual_h, :actual_w]
+            text_region = alpha_crop > 0.12
+            if not np.any(text_region):
+                continue
+
+            existing_region = mask[y:y+actual_h, x:x+actual_w]
+            if np.any(existing_region[text_region] > 0):
+                continue
+
+            success = True
+            break
+
+        if not success:
+            return img, mask
 
         rgb = rgb[:actual_h, :actual_w]
         alpha = alpha[:actual_h, :actual_w]
-
         roi = img[y:y+actual_h, x:x+actual_w].astype(np.float32)
 
         # ==================================================
         # 6. blending
         # ==================================================
         alpha_3 = np.stack([alpha]*3, axis=-1)
-
         blended = alpha_3 * rgb + (1 - alpha_3) * roi
-
         img[y:y+actual_h, x:x+actual_w] = blended.astype(np.uint8)
 
         # ==================================================
         # 7. mask (must match SAME SHAPE)
         # ==================================================
-        text_region = alpha > 0.12
-
         mask[y:y+actual_h, x:x+actual_w][text_region] = 2
 
         return img, mask
