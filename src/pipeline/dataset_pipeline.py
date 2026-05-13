@@ -157,6 +157,14 @@ class DatasetPipeline:
             clean=True
         )
 
+        # ==================================================
+        # 🚀 remove original images and masks after split
+        # ==================================================
+        for path in [self.cfg.OUTPUT_IMG, self.cfg.OUTPUT_MASK]:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+                Logger.info(f"[pipeline] removed {path}")
+
         Logger.info("[pipeline] done")
 
     # ==================================================
