@@ -183,7 +183,7 @@ class DatasetPipeline:
             tasks.append({
                 "id": f"iam_{i}",
                 "source": "iam",
-                "seed": rng.randint(0, 10**9),
+                "seed": rng.randint(0, 10**18),
                 "name": f"iam_{i}",
             })
 
@@ -195,7 +195,7 @@ class DatasetPipeline:
             tasks.append({
                 "id": f"casia_{i}",
                 "source": "casia",
-                "seed": rng.randint(0, 10**9),
+                "seed": rng.randint(0, 10**18),
                 "name": f"casia_{i}",
             })
 
