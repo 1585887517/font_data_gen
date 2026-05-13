@@ -180,10 +180,9 @@ class HandwritingLoader:
     # ==================================================
     # 🚀 关键：按 source 取数据（1:1控制点）
     # ==================================================
-    def overlay_by_source(self, img, mask, source):
+    def overlay_by_source(self, img, mask, source, allow_overlap=False):
 
      
-
         files = (
             self.iam_rgba if source == "iam"
             else self.casia_rgba
@@ -296,9 +295,10 @@ class HandwritingLoader:
             if not np.any(text_region):
                 continue
 
-            existing_region = mask[y:y+actual_h, x:x+actual_w]
-            if np.any(existing_region[text_region] > 0):
-                continue
+            if not allow_overlap:
+                existing_region = mask[y:y+actual_h, x:x+actual_w]
+                if np.any(existing_region[text_region] > 0):
+                    continue
 
             success = True
             break

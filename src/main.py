@@ -20,7 +20,7 @@ def main():
         if os.path.isdir(rotate_dir) and not os.listdir(rotate_dir):
             os.rmdir(rotate_dir)
         
-        modes = ["printed_only", "handwriting_only", "both"]
+        modes = ["printed_only", "handwriting_only", "both", "both_overlap"]
         total_duration = 0
         for mode in modes:
             Logger.info(f"[rotate] Starting {mode} mode")

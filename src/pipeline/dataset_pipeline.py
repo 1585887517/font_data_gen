@@ -46,14 +46,19 @@ def worker(task):
     img, mask = gen.build()
 
     overlay_count = 0
+    allow_overlap = False
     if task_mode == "both":
         overlay_min, overlay_max = cfg.HANDWRITING_OVERLAYS_PER_IMAGE
         overlay_count = random.randint(overlay_min, overlay_max)
+    elif task_mode == "both_overlap":
+        overlay_min, overlay_max = cfg.HANDWRITING_OVERLAYS_PER_IMAGE
+        overlay_count = random.randint(overlay_min, overlay_max)
+        allow_overlap = True
     elif task_mode == "handwriting_only":
         overlay_count = random.randint(5, 10)
 
     for _ in range(overlay_count):
-        img, mask = hw.overlay_by_source(img, mask, task["source"])
+        img, mask = hw.overlay_by_source(img, mask, task["source"], allow_overlap=allow_overlap)
 
     cfg.DATASET_MODE = original_mode
 

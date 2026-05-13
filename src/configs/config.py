@@ -102,7 +102,7 @@ class Config:
     # ==================================================
     # 🚀 dataset config
     # ==================================================
-    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "20"))
+    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "40000"))
 
     TRAIN_RATIO = 0.7
     VAL_RATIO = 0.2
@@ -172,7 +172,7 @@ class Config:
             return ["background", "printed_text"]
         elif cls.DATASET_MODE == "handwriting_only":
             return ["background", "handwriting"]
-        else:  # both or rotate
+        else:  # both, both_overlap, or rotate
             return ["background", "printed_text", "handwriting"]
 
     # ==================================================
