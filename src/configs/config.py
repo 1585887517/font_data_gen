@@ -102,7 +102,7 @@ class Config:
     # ==================================================
     # 🚀 dataset config
     # ==================================================
-    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "40000"))
+    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "20"))
 
     TRAIN_RATIO = 0.7
     VAL_RATIO = 0.2
@@ -143,24 +143,23 @@ class Config:
     # ==================================================
     # 🚀 auto create dirs
     # ==================================================
-    @classmethod
-    def init_dirs(cls):
+    def init_dirs(self):
 
         dirs = [
-            cls.OUTPUT_ROOT,
-            cls.OUTPUT_IMG,
-            cls.OUTPUT_MASK,
-            cls.OUTPUT_DIR,
+            getattr(self, 'OUTPUT_ROOT', type(self).OUTPUT_ROOT),
+            getattr(self, 'OUTPUT_IMG', type(self).OUTPUT_IMG),
+            getattr(self, 'OUTPUT_MASK', type(self).OUTPUT_MASK),
+            getattr(self, 'OUTPUT_DIR', type(self).OUTPUT_DIR),
 
-            cls.HANDWRITING_ROOT,
-            cls.IAM_DIR,
-            cls.CASIA_DIR,
+            self.HANDWRITING_ROOT,
+            self.IAM_DIR,
+            self.CASIA_DIR,
 
-            cls.IAM_RGBA_DIR,
-            cls.CASIA_RGBA_DIR,
+            self.IAM_RGBA_DIR,
+            self.CASIA_RGBA_DIR,
 
-            cls.FONT_ROOT,
-            cls.TEXT_ROOT,
+            self.FONT_ROOT,
+            self.TEXT_ROOT,
         ]
 
         for d in dirs:
@@ -168,9 +167,19 @@ class Config:
 
     @classmethod
     def get_dataset_classes(cls):
-        if cls.DATASET_MODE == "printed_only":
+        mode = cls.DATASET_MODE
+        if mode == "printed_only":
             return ["background", "printed_text"]
-        elif cls.DATASET_MODE == "handwriting_only":
+        elif mode == "handwriting_only":
+            return ["background", "handwriting"]
+        else:  # both, both_overlap, or rotate
+            return ["background", "printed_text", "handwriting"]
+
+    def get_dataset_classes_instance(self):
+        mode = getattr(self, 'DATASET_MODE', type(self).DATASET_MODE)
+        if mode == "printed_only":
+            return ["background", "printed_text"]
+        elif mode == "handwriting_only":
             return ["background", "handwriting"]
         else:  # both, both_overlap, or rotate
             return ["background", "printed_text", "handwriting"]

@@ -26,7 +26,7 @@ def create_labels_txt(out_dir, labels):
 # ==================================================
 def create_dataset_info(cfg):
 
-    classes = cfg.get_dataset_classes()
+    classes = cfg.get_dataset_classes_instance()
     info = {
         "dataset_name": cfg.DATASET_NAME,
 
@@ -67,7 +67,7 @@ def create_dataset_info(cfg):
 # ==================================================
 def build_dataset_metadata(cfg):
 
-    classes = cfg.get_dataset_classes()
+    classes = cfg.get_dataset_classes_instance()
     create_labels_txt(cfg.OUTPUT_DIR, classes)
 
     create_dataset_info(cfg)

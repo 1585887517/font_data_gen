@@ -16,10 +16,6 @@ def main():
     cfg = Config()
 
     if cfg.DATASET_MODE == "rotate":
-        rotate_dir = os.path.join(PROJECT_ROOT, "output/rotate")
-        if os.path.isdir(rotate_dir) and not os.listdir(rotate_dir):
-            os.rmdir(rotate_dir)
-        
         modes = ["printed_only", "handwriting_only", "both", "both_overlap"]
         total_duration = 0
         for mode in modes:
