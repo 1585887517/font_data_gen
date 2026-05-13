@@ -32,8 +32,9 @@ def worker(task):
     import random
     import numpy as np
 
-    random.seed(task["seed"])
-    np.random.seed(task["seed"])
+    seed = task["seed"]
+    random.seed(seed)
+    np.random.seed(seed % (2**32))
 
     cfg = _CFG
     gen = _GEN
