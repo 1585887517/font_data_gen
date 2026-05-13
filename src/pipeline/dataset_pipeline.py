@@ -39,22 +39,27 @@ def worker(task):
     gen = _GEN
     hw = _HW
 
+    task_mode = task.get("dataset_mode", cfg.DATASET_MODE)
+    original_mode = cfg.DATASET_MODE
+    cfg.DATASET_MODE = task_mode
+
     img, mask = gen.build()
 
     overlay_count = 0
-    if cfg.DATASET_MODE == "both":
+    if task_mode == "both":
         overlay_min, overlay_max = cfg.HANDWRITING_OVERLAYS_PER_IMAGE
         overlay_count = random.randint(overlay_min, overlay_max)
-    elif cfg.DATASET_MODE == "handwriting_only":
-        # 为 handwriting_only 模式增加更多手写叠加
+    elif task_mode == "handwriting_only":
         overlay_count = random.randint(5, 10)
 
     for _ in range(overlay_count):
         img, mask = hw.overlay_by_source(img, mask, task["source"])
 
+    cfg.DATASET_MODE = original_mode
+
     min_foreground = (
         cfg.MIN_HANDWRITING_RATIO
-        if cfg.DATASET_MODE == "handwriting_only"
+        if task_mode == "handwriting_only"
         else cfg.MIN_FOREGROUND_RATIO
     )
 
@@ -180,6 +185,9 @@ class DatasetPipeline:
                 "seed": rng.randint(0, 10**9),
                 "name": f"casia_{i}",
             })
+
+        for task in tasks:
+            task["dataset_mode"] = self.cfg.DATASET_MODE
 
         rng.shuffle(tasks)
 

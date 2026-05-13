@@ -48,7 +48,7 @@ class Config:
     # 🚀 output
     # ==================================================
         # 数据集模式：printed_only, handwriting_only, both
-    DATASET_MODE = "both"
+    DATASET_MODE = "rotate"
     OUTPUT_ROOT = os.path.join(PROJECT_ROOT, f"output/{DATASET_MODE}")
 
     OUTPUT_IMG = os.path.join(OUTPUT_ROOT, "images")
@@ -102,7 +102,7 @@ class Config:
     # ==================================================
     # 🚀 dataset config
     # ==================================================
-    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "40000"))
+    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "20"))
 
     TRAIN_RATIO = 0.7
     VAL_RATIO = 0.2
@@ -172,7 +172,7 @@ class Config:
             return ["background", "printed_text"]
         elif cls.DATASET_MODE == "handwriting_only":
             return ["background", "handwriting"]
-        else:  # both
+        else:  # both or rotate
             return ["background", "printed_text", "handwriting"]
 
     # ==================================================
