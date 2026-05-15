@@ -48,7 +48,7 @@ class Config:
     # 🚀 output
     # ==================================================
         # 数据集模式：printed_only, handwriting_only, both
-    DATASET_MODE = "rotate"
+    DATASET_MODE = "both"
     OUTPUT_ROOT = os.path.join(PROJECT_ROOT, f"output/{DATASET_MODE}")
 
     OUTPUT_IMG = os.path.join(OUTPUT_ROOT, "images")
@@ -127,6 +127,9 @@ class Config:
     ENABLE_PAPER_TEXTURE = True
     ENABLE_FORM_LAYOUT = True
     ENABLE_PHONE_EFFECTS = True
+
+    # 手写体靠近印刷体/线条的概率，用于解决邻近识别问题
+    HANDWRITING_PROXIMITY_PROB = 0.5
 
     # ==================================================
     # 🚀 augmentation

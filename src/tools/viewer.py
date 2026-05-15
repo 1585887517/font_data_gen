@@ -2,7 +2,6 @@ import os
 import cv2
 import numpy as np
 import re
-import argparse
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -10,35 +9,47 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QHBoxLayout,
-    QVBoxLayout
+    QVBoxLayout,
+    QComboBox
 )
 
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 
 class Viewer(QWidget):
 
-    def __init__(self, img_dir, mask_dir):
+    def __init__(self, root_dir):
 
         super().__init__()
 
-        self.img_dir = img_dir
-        self.mask_dir = mask_dir
+        self.root_dir = root_dir
+        self.splits = ["train", "val", "test"]
+        self.current_split = "train"
 
         def extract_num(x):
             nums = re.findall(r"\d+", x)
             return int(nums[-1]) if nums else -1
 
-        self.imgs = sorted(
-            os.listdir(self.img_dir),
-            key=extract_num
-        )
+        self.extract_num = extract_num
 
         self.i = 0
 
         self.init_ui()
-        self.load_current()
+        self.load_images()
+
+    # ==================================================
+    # load images for current split
+    # ==================================================
+    def load_images(self):
+        img_dir = os.path.join(self.root_dir, "images", self.current_split)
+        if os.path.exists(img_dir):
+            self.imgs = sorted(os.listdir(img_dir), key=self.extract_num)
+        else:
+            self.imgs = []
+        self.i = 0
 
     # ==================================================
     # UI
@@ -57,6 +68,11 @@ class Viewer(QWidget):
         self.stats_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.stats_label.setWordWrap(True)
 
+        self.split_combo = QComboBox()
+        self.split_combo.addItems(self.splits)
+        self.split_combo.setCurrentText(self.current_split)
+        self.split_combo.currentTextChanged.connect(self.on_split_changed)
+
         self.prev_btn = QPushButton("Previous")
         self.next_btn = QPushButton("Next")
 
@@ -67,30 +83,40 @@ class Viewer(QWidget):
         top_layout.addWidget(self.img_label)
         top_layout.addWidget(self.mask_label)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.prev_btn)
-        btn_layout.addWidget(self.next_btn)
-        btn_layout.addStretch()
+        control_layout = QHBoxLayout()
+        control_layout.addWidget(QLabel("Split:"))
+        control_layout.addWidget(self.split_combo)
+        control_layout.addStretch()
+        control_layout.addWidget(self.prev_btn)
+        control_layout.addWidget(self.next_btn)
+        control_layout.addStretch()
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(top_layout)
         main_layout.addWidget(self.stats_label)
-        main_layout.addLayout(btn_layout)
+        main_layout.addLayout(control_layout)
 
         self.setLayout(main_layout)
+
+    def on_split_changed(self, split):
+        self.current_split = split
+        self.load_images()
+        self.load_current()
 
     # ==================================================
     # load
     # ==================================================
     def load_current(self):
 
+        if not self.imgs:
+            self.stats_label.setText("No images available in current split.")
+            return
+
         name = self.imgs[self.i]
 
-        img_path = os.path.join(self.img_dir, name)
-        # Convert image extension to .png for mask lookup
+        img_path = os.path.join(self.root_dir, "images", self.current_split, name)
         mask_name = os.path.splitext(name)[0] + ".png"
-        mask_path = os.path.join(self.mask_dir, mask_name)
+        mask_path = os.path.join(self.root_dir, "labels", self.current_split, mask_name)
 
         img = cv2.imread(img_path)
         mask = cv2.imread(mask_path, 0)
@@ -188,25 +214,15 @@ class Viewer(QWidget):
 # ==================================================
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Dataset Viewer")
-    parser.add_argument('--dir', required=True, help='Dataset root directory containing images/ and masks/ subdirectories')
+    dataset_dir = os.path.join(PROJECT_ROOT, "output/both/dataset")
 
-    args = parser.parse_args()
-
-    img_dir = os.path.join(args.dir, 'images')
-    mask_dir = os.path.join(args.dir, 'masks')
-
-    if not os.path.exists(img_dir):
-        print(f"Error: Images directory not found: {img_dir}")
-        exit(1)
-
-    if not os.path.exists(mask_dir):
-        print(f"Error: Masks directory not found: {mask_dir}")
+    if not os.path.exists(dataset_dir):
+        print(f"Error: Dataset directory not found: {dataset_dir}")
         exit(1)
 
     app = QApplication([])
 
-    viewer = Viewer(img_dir, mask_dir)
+    viewer = Viewer(dataset_dir)
 
     viewer.show()
 

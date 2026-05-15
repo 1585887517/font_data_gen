@@ -78,9 +78,7 @@ class DocumentGenerator:
 
 
     def _discover_fonts(self):
-
         font_paths = []
-
         if os.path.isdir(self.cfg.FONT_ROOT):
             for name in sorted(os.listdir(self.cfg.FONT_ROOT)):
                 if name.lower().endswith((".otf", ".ttf", ".ttc")):
@@ -88,6 +86,22 @@ class DocumentGenerator:
 
         if not font_paths:
             font_paths.append(self.cfg.FONT_PATH)
+
+        # 简单分类：包含 "SC", "ZH", "CN", "ZCOOL", "ZhiMang", "MaShan", "LongCang" 的通常支持中文
+        self.chinese_font_paths = []
+        self.english_only_font_paths = []
+        
+        cn_keywords = ["sc", "zh", "cn", "zcool", "zhimang", "mashan", "longcang", "serif", "hand"]
+        for p in font_paths:
+            name_lower = os.path.basename(p).lower()
+            if any(k in name_lower for k in cn_keywords):
+                self.chinese_font_paths.append(p)
+            else:
+                self.english_only_font_paths.append(p)
+        
+        # 如果没有识别出中文字体，则全部视为中文字体以防万一
+        if not self.chinese_font_paths:
+            self.chinese_font_paths = font_paths
 
         return font_paths
 
@@ -101,11 +115,23 @@ class DocumentGenerator:
         return int(round(pt * self.dpi / 72.0))
 
 
-    def _font(self, pt_size):
-
+    def _font(self, pt_size, text=None):
         px_size = self._pt_to_px(pt_size)
         nearest_size = min(self.font_sizes, key=lambda s: abs(s - px_size))
-        font_path = random.choice(self.font_paths)
+        
+        # 判断文本是否包含中文
+        is_chinese = False
+        if text:
+            for char in text:
+                if '\u4e00' <= char <= '\u9fff':
+                    is_chinese = True
+                    break
+        
+        if is_chinese:
+            font_path = random.choice(self.chinese_font_paths)
+        else:
+            font_path = random.choice(self.font_paths)
+            
         return self.font_cache[(font_path, nearest_size)]
 
 
@@ -233,6 +259,12 @@ class DocumentGenerator:
             else:
                 self._draw_free_printed_text(draw, mask)
 
+            # ==================================================
+            # 3. 增加背景干扰（如干扰线、下划线）
+            # ==================================================
+            if random.random() < 0.65:
+                self._draw_background_noise(draw)
+
         # ==================================================
         # 🚀 转numpy
         # ==================================================
@@ -259,7 +291,7 @@ class DocumentGenerator:
         for _ in range(line_count):
 
             text = self._build_text(min_words=4, max_words=12, category="general")
-            font = self._font(random.choice([11, 12, 13, 14, 16]))
+            font = self._font(random.choice([11, 12, 13, 14, 16]), text=text)
 
             x = random.choice(column_x) + random.randint(0, 24)
 
@@ -290,10 +322,6 @@ class DocumentGenerator:
 
     def _draw_structured_printed_text(self, draw, mask):
 
-        title_font = self._font(random.choice([18, 20, 22, 24]))
-        label_font = self._font(random.choice([11, 12, 13, 14]))
-        body_font = self._font(random.choice([11, 12, 13, 14]))
-
         title = random.choice([
             "费用报销单",
             "收货确认单",
@@ -301,6 +329,10 @@ class DocumentGenerator:
             "合同审批表",
             "Inspection Report"
         ])
+        
+        title_font = self._font(random.choice([18, 20, 22, 24]), text=title)
+        label_font = self._font(random.choice([11, 12, 13, 14]), text="中文") # Labels are usually Chinese
+        body_font = self._font(random.choice([11, 12, 13, 14]), text="中文") # Default to Chinese for structured
 
         self._draw_printed_text(
             draw,
@@ -356,19 +388,20 @@ class DocumentGenerator:
 
     def _draw_receipt_layout(self, draw, mask):
 
-        title_font = self._font(random.choice([14, 16, 18, 20]))
-        item_font = self._font(random.choice([10, 11, 12, 13]))
-        total_font = self._font(random.choice([16, 18, 20, 22]))
-
         x0 = random.randint(145, 230)
         width = random.randint(450, 650)
         y = random.randint(30, 70)
         right = min(self.cfg.WIDTH - 30, x0 + width)
 
+        title_text = random.choice(["SALES INVOICE", "费用明细", "Delivery Note", "收款凭证"])
+        title_font = self._font(random.choice([14, 16, 18, 20]), text=title_text)
+        item_font = self._font(random.choice([10, 11, 12, 13]), text="中文")
+        total_font = self._font(random.choice([16, 18, 20, 22]), text="中文")
+
         self._draw_printed_text(
             draw,
             mask,
-            random.choice(["SALES INVOICE", "费用明细", "Delivery Note", "收款凭证"]),
+            title_text,
             (x0 + random.randint(60, 150), y),
             title_font,
             (random.randint(0, 65),) * 3
@@ -467,8 +500,8 @@ class DocumentGenerator:
         )
 
         blur_mask = cv2.GaussianBlur(text_mask, (3, 3), 0)
-        mask[y0:y1, x0:x1][blur_mask > 32] = 1
-        self._occupied[y0:y1, x0:x1][text_mask > 32] = 1
+        mask[y0:y1, x0:x1][blur_mask > 60] = 1
+        self._occupied[y0:y1, x0:x1][text_mask > 20] = 1
 
         return True
 
@@ -530,6 +563,44 @@ class DocumentGenerator:
                 outline=stamp_color,
                 width=2
             )
+
+    def _draw_background_noise(self, draw):
+        """
+        绘制背景干扰元素，如杂线、下划线、印章干扰等
+        这些元素属于背景（mask=0）
+        """
+        W = self.cfg.WIDTH
+        H = self.cfg.HEIGHT
+
+        # 1. 随机下划线/水平参考线
+        for _ in range(random.randint(5, 15)):
+            if random.random() < 0.3:
+                x0 = random.randint(20, W // 2)
+                x1 = x0 + random.randint(100, W // 2)
+                y = random.randint(50, H - 50)
+                color = (random.randint(180, 230),) * 3
+                draw.line([x0, y, x1, y], fill=color, width=1)
+
+        # 2. 随机干扰杂线（模拟折痕或背景污染）
+        if random.random() < 0.4:
+            for _ in range(random.randint(2, 5)):
+                x0 = random.randint(0, W)
+                y0 = random.randint(0, H)
+                x1 = x0 + random.randint(-100, 100)
+                y1 = y0 + random.randint(-100, 100)
+                color = (random.randint(200, 240),) * 3
+                draw.line([x0, y0, x1, y1], fill=color, width=1)
+
+        # 3. 随机小方格（模拟填表区域）
+        if random.random() < 0.3:
+            grid_y = random.randint(100, H - 200)
+            grid_x = random.randint(50, 150)
+            for i in range(random.randint(3, 8)):
+                draw.rectangle(
+                    [grid_x + i * 35, grid_y, grid_x + i * 35 + 25, grid_y + 25],
+                    outline=(random.randint(150, 210),) * 3,
+                    width=1
+                )
 
 
     def _create_paper_background(self):
@@ -612,7 +683,9 @@ class DocumentGenerator:
                 (k, k),
                 0
             )
-            mask = self._expand_mask_classes(mask, classes=(1,), iterations=1)
+            # 根据模糊核大小动态膨胀：3x3 膨胀 1 次，5x5 膨胀 2 次
+            iters = 1 if k == 3 else 2
+            mask = self._expand_mask_classes(mask, classes=(1,), iterations=iters)
 
         # ==================================================
         # 2. 墨水扩散

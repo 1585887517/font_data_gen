@@ -279,8 +279,12 @@ class HandwritingLoader:
         # ==================================================
         # 5. avoid overlap with printed text and existing handwriting
         # ==================================================
-        max_attempts = 16
+        max_attempts = 32
         success = False
+        
+        # 决定是否启用“邻近”模式
+        force_proximity = random.random() < getattr(self.cfg, "HANDWRITING_PROXIMITY_PROB", 0.0)
+
         for _ in range(max_attempts):
             x = random.randint(x_low, x_high)
             y = random.randint(y_low, y_high)
@@ -291,12 +295,24 @@ class HandwritingLoader:
                 continue
 
             alpha_crop = alpha[:actual_h, :actual_w]
-            text_region = alpha_crop > 0.12
+            text_region = alpha_crop > 0.08
             if not np.any(text_region):
                 continue
 
+            existing_region = mask[y:y+actual_h, x:x+actual_w]
+            
+            # 如果启用了邻近模式，我们需要该区域周围已经有东西（类 1 或类 2）
+            if force_proximity:
+                # 检查 20 像素范围内的邻近区域
+                y_near_min = max(0, y - 20)
+                y_near_max = min(H, y + actual_h + 20)
+                x_near_min = max(0, x - 20)
+                x_near_max = min(W, x + actual_w + 20)
+                near_mask = mask[y_near_min:y_near_max, x_near_min:x_near_max]
+                if not np.any(near_mask > 0):
+                    continue
+
             if not allow_overlap:
-                existing_region = mask[y:y+actual_h, x:x+actual_w]
                 if np.any(existing_region[text_region] > 0):
                     continue
 

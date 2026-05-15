@@ -81,11 +81,17 @@ def worker(task):
         extra_count += 1
 
     r = random.random()
-
-    if r < 0.45:
+    if r < 0.35:
         img, mask = A.rotate(img, mask)
-    elif r < 0.9:
+    elif r < 0.70:
         img, mask = A.perspective(img, mask)
+    
+    # 随机增加凹凸或弯曲形变
+    if random.random() < 0.4:
+        if random.random() < 0.5:
+            img, mask = A.mesh_distortion(img, mask)
+        else:
+            img, mask = A.bending_warp(img, mask)
 
     if cfg.ENABLE_SCAN_NOISE:
         img, mask = A.scan_noise(img, mask, phone_effects=cfg.ENABLE_PHONE_EFFECTS)

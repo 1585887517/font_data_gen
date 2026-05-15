@@ -13,8 +13,8 @@ class Augmentations:
 
         h, w = img.shape[:2]
 
-        margin_x = int(w * 0.08)
-        margin_y = int(h * 0.08)
+        margin_x = int(w * random.uniform(0.02, 0.15))
+        margin_y = int(h * random.uniform(0.02, 0.15))
 
         src = np.float32([
             [0, 0],
@@ -58,6 +58,93 @@ class Augmentations:
             flags=cv2.INTER_NEAREST,
             borderValue=0
         )
+
+        return img, mask
+
+
+    # ==================================================
+    # 🚀 纸张凹凸/局部形变 (Mesh Distortion)
+    # ==================================================
+    @staticmethod
+    def mesh_distortion(img, mask):
+        """
+        模拟纸张局部凹凸不平的效果
+        """
+        h, w = img.shape[:2]
+
+        # 网格密度
+        grid_steps = random.randint(4, 8)
+        grid_h = np.linspace(0, h, grid_steps)
+        grid_w = np.linspace(0, w, grid_steps)
+
+        mesh_h, mesh_w = np.meshgrid(grid_h, grid_w, indexing='ij')
+
+        # 给内部网格点增加随机位移
+        strength = random.uniform(2.0, 8.5)
+        distort_h = mesh_h + np.random.normal(0, strength, mesh_h.shape)
+        distort_w = mesh_w + np.random.normal(0, strength, mesh_w.shape)
+
+        # 边界保持不动
+        distort_h[0, :] = 0
+        distort_h[-1, :] = h
+        distort_h[:, 0] = mesh_h[:, 0]
+        distort_h[:, -1] = mesh_h[:, -1]
+
+        distort_w[0, :] = mesh_w[0, :]
+        distort_w[-1, :] = mesh_w[-1, :]
+        distort_w[:, 0] = 0
+        distort_w[:, -1] = w
+
+        # 插值生成重映射表
+        from scipy.interpolate import RectBivariateSpline
+        
+        # 简单方案：使用 cv2.resize 插值回全图大小
+        map_h = cv2.resize(distort_h, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+        map_w = cv2.resize(distort_w, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+
+        img = cv2.remap(img, map_w, map_h, interpolation=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
+        mask = cv2.remap(mask, map_w, map_h, interpolation=cv2.INTER_NEAREST, borderValue=0)
+
+        # 形变后进行微量膨胀，补偿插值损失并保持笔画连续
+        mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=1)
+
+        return img, mask
+
+
+    # ==================================================
+    # 🚀 页面弯曲/弧度 (Bending Warp)
+    # ==================================================
+    @staticmethod
+    def bending_warp(img, mask):
+        """
+        模拟书页弯曲或卷曲的效果
+        """
+        h, w = img.shape[:2]
+        
+        # 随机选择弯曲方向（水平或垂直）
+        direction = random.choice(['horizontal', 'vertical'])
+        
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        
+        if direction == 'horizontal':
+            # 水平弯曲（圆柱形或正弦形）
+            curve = random.uniform(15, 45)
+            # 随机相位，模拟不同的弯曲中心
+            phase = random.uniform(0, np.pi)
+            offset = curve * np.sin(yy / h * np.pi + phase)
+            xx = xx + offset
+        else:
+            # 垂直弯曲
+            curve = random.uniform(15, 45)
+            phase = random.uniform(0, np.pi)
+            offset = curve * np.sin(xx / w * np.pi + phase)
+            yy = yy + offset
+
+        img = cv2.remap(img, xx, yy, interpolation=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
+        mask = cv2.remap(mask, xx, yy, interpolation=cv2.INTER_NEAREST, borderValue=0)
+
+        # 形变后进行微量膨胀，补偿插值损失并保持笔画连续
+        mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=1)
 
         return img, mask
 
@@ -143,8 +230,9 @@ class Augmentations:
                 (k, k),
                 0
             )
-            if k == 5:
-                mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=1)
+            # 动态膨胀：3x3 膨胀 1 次，5x5 膨胀 2 次
+            iters = 1 if k == 3 else 2
+            mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=iters)
 
         if mask is None:
             return img
