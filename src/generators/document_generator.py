@@ -499,9 +499,11 @@ class DocumentGenerator:
             font=font
         )
 
-        blur_mask = cv2.GaussianBlur(text_mask, (3, 3), 0)
-        mask[y0:y1, x0:x1][blur_mask > 60] = 1
-        self._occupied[y0:y1, x0:x1][text_mask > 20] = 1
+        roi_mask = mask[y0:y1, x0:x1]
+        roi_mask[text_mask > 20] = 1
+        
+        roi_occupied = self._occupied[y0:y1, x0:x1]
+        roi_occupied[text_mask > 20] = 1
 
         return True
 
@@ -683,9 +685,6 @@ class DocumentGenerator:
                 (k, k),
                 0
             )
-            # 根据模糊核大小动态膨胀：3x3 膨胀 1 次，5x5 膨胀 2 次
-            iters = 1 if k == 3 else 2
-            mask = self._expand_mask_classes(mask, classes=(1,), iterations=iters)
 
         # ==================================================
         # 2. 墨水扩散
@@ -702,7 +701,6 @@ class DocumentGenerator:
             )
 
             img = 255 - dark
-            mask = self._expand_mask_classes(mask, classes=(1,), iterations=1)
 
         # ==================================================
         # 3. JPEG artifact

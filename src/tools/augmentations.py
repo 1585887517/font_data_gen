@@ -105,9 +105,6 @@ class Augmentations:
         img = cv2.remap(img, map_w, map_h, interpolation=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
         mask = cv2.remap(mask, map_w, map_h, interpolation=cv2.INTER_NEAREST, borderValue=0)
 
-        # 形变后进行微量膨胀，补偿插值损失并保持笔画连续
-        mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=1)
-
         return img, mask
 
 
@@ -142,9 +139,6 @@ class Augmentations:
 
         img = cv2.remap(img, xx, yy, interpolation=cv2.INTER_LINEAR, borderValue=(255, 255, 255))
         mask = cv2.remap(mask, xx, yy, interpolation=cv2.INTER_NEAREST, borderValue=0)
-
-        # 形变后进行微量膨胀，补偿插值损失并保持笔画连续
-        mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=1)
 
         return img, mask
 
@@ -207,7 +201,6 @@ class Augmentations:
             )
 
             img = 255 - dark
-            mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=1)
 
         if mask is None:
             return img
@@ -230,9 +223,6 @@ class Augmentations:
                 (k, k),
                 0
             )
-            # 动态膨胀：3x3 膨胀 1 次，5x5 膨胀 2 次
-            iters = 1 if k == 3 else 2
-            mask = Augmentations.expand_label_edges(mask, classes=(1, 2), iterations=iters)
 
         if mask is None:
             return img

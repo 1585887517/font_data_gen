@@ -336,6 +336,7 @@ class HandwritingLoader:
         # ==================================================
         # 7. mask (must match SAME SHAPE)
         # ==================================================
-        mask[y:y+actual_h, x:x+actual_w][text_region] = 2
+        roi_mask = mask[y:y+actual_h, x:x+actual_w]
+        roi_mask[text_region] = 2
 
         return img, mask
