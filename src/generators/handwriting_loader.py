@@ -120,9 +120,8 @@ class HandwritingLoader:
             if f.endswith(".png")
         ]
 
-        if len(existing) > 0:
+        if len(existing) > 0 and not getattr(self.cfg, "REBUILD_HANDWRITING_RGBA", False):
             return existing
-
 
         # ==================================================
         # 🚀 RAW → RGBA
@@ -135,23 +134,7 @@ class HandwritingLoader:
                 Logger.warn(f"Failed to read: {f}")
                 continue
 
-            # ==================================================
-            # 1. 灰度化
-            # ==================================================
-            gray = cv2.cvtColor(
-                img,
-                cv2.COLOR_BGR2GRAY
-            )
-
-            # ==================================================
-            # 2. 白底去除（核心）
-            # ==================================================
-            _, alpha = cv2.threshold(
-                gray,
-                235,
-                255,
-                cv2.THRESH_BINARY_INV
-            )
+            alpha = self._extract_stroke_alpha(img)
 
             # ==================================================
             # 3. RGBA合并
@@ -175,6 +158,71 @@ class HandwritingLoader:
         Logger.info(f"{name} RGBA generated: {len(rgba_list)}")
 
         return rgba_list    
+
+
+    def _extract_stroke_alpha(self, img):
+
+        gray = cv2.cvtColor(
+            img,
+            cv2.COLOR_BGR2GRAY
+        )
+
+        h, w = gray.shape[:2]
+        border = max(2, min(h, w) // 20)
+        border_pixels = np.concatenate([
+            gray[:border, :].reshape(-1),
+            gray[-border:, :].reshape(-1),
+            gray[:, :border].reshape(-1),
+            gray[:, -border:].reshape(-1),
+        ])
+        background_level = float(np.percentile(border_pixels, 75))
+
+        contrast = np.clip(background_level - gray.astype(np.float32), 0, 255).astype(np.uint8)
+        contrast = cv2.GaussianBlur(contrast, (3, 3), 0)
+
+        positive = contrast[contrast > 0]
+        if positive.size == 0:
+            return np.zeros_like(gray, dtype=np.uint8)
+
+        otsu_threshold, _ = cv2.threshold(
+            contrast,
+            0,
+            255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )
+
+        min_contrast = getattr(self.cfg, "HANDWRITING_MIN_STROKE_CONTRAST", 28)
+        threshold = max(int(otsu_threshold), int(min_contrast))
+        alpha = (contrast >= threshold).astype(np.uint8) * 255
+
+        return self._clean_stroke_mask(alpha)
+
+
+    def _clean_stroke_mask(self, alpha):
+
+        if alpha.dtype != np.uint8:
+            alpha = np.clip(alpha, 0, 255).astype(np.uint8)
+
+        _, binary = cv2.threshold(alpha, 0, 255, cv2.THRESH_BINARY)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            binary,
+            connectivity=8
+        )
+
+        min_area = getattr(self.cfg, "HANDWRITING_MIN_COMPONENT_AREA", 8)
+        min_side = getattr(self.cfg, "HANDWRITING_MIN_COMPONENT_SIDE", 2)
+        cleaned = np.zeros_like(binary)
+
+        for label in range(1, num_labels):
+            x, y, w, h, area = stats[label]
+            if area < min_area:
+                continue
+            if w < min_side and h < min_side:
+                continue
+            cleaned[labels == label] = 255
+
+        return cleaned
 
 
     # ==================================================
@@ -201,10 +249,12 @@ class HandwritingLoader:
         # ==================================================
         # 1. split
         # ==================================================
-        rgb = cv2.cvtColor(hw[:, :, :3], cv2.COLOR_BGR2RGB).astype(np.float32)
-        alpha = hw[:, :, 3].astype(np.float32) / 255.0
+        source_bgr = hw[:, :, :3]
+        rgb = cv2.cvtColor(source_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+        alpha_binary = self._extract_stroke_alpha(source_bgr)
+        alpha = alpha_binary.astype(np.float32) / 255.0
 
-        ys, xs = np.where(alpha > 0)
+        ys, xs = np.where(alpha_binary > 0)
         if len(xs) == 0 or len(ys) == 0:
             return img, mask
 
@@ -215,12 +265,18 @@ class HandwritingLoader:
         y1 = min(alpha.shape[0], int(ys.max()) + pad + 1)
         rgb = rgb[y0:y1, x0:x1]
         alpha = alpha[y0:y1, x0:x1]
+        label_alpha = alpha_binary[y0:y1, x0:x1]
+        label_alpha = self._prepare_label_mask(label_alpha)
 
         # ==================================================
         # 2. degradation (optional realism)
         # ==================================================
         alpha *= random.uniform(0.62, 1.0)
-        alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
+        feather_blur = getattr(self.cfg, "HANDWRITING_FEATHER_BLUR", 3)
+        if feather_blur > 1:
+            if feather_blur % 2 == 0:
+                feather_blur += 1
+            alpha = cv2.GaussianBlur(alpha, (feather_blur, feather_blur), 0)
 
         ink_palette = random.choice([
             np.array([135, 24, 42], dtype=np.float32),
@@ -248,6 +304,8 @@ class HandwritingLoader:
 
             rgb = cv2.resize(rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
             alpha = cv2.resize(alpha, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            label_alpha = cv2.resize(label_alpha, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+            label_alpha = self._prepare_label_mask(label_alpha)
 
             h, w = new_h, new_w
 
@@ -295,7 +353,8 @@ class HandwritingLoader:
                 continue
 
             alpha_crop = alpha[:actual_h, :actual_w]
-            text_region = alpha_crop > 0.08
+            label_crop = label_alpha[:actual_h, :actual_w]
+            text_region = label_crop > 0
             if not np.any(text_region):
                 continue
 
@@ -324,6 +383,7 @@ class HandwritingLoader:
 
         rgb = rgb[:actual_h, :actual_w]
         alpha = alpha[:actual_h, :actual_w]
+        label_alpha = label_alpha[:actual_h, :actual_w]
         roi = img[y:y+actual_h, x:x+actual_w].astype(np.float32)
 
         # ==================================================
@@ -337,6 +397,18 @@ class HandwritingLoader:
         # 7. mask (must match SAME SHAPE)
         # ==================================================
         roi_mask = mask[y:y+actual_h, x:x+actual_w]
+        text_region = label_alpha > 0
         roi_mask[text_region] = 2
 
         return img, mask
+
+
+    def _prepare_label_mask(self, label_alpha):
+
+        label_alpha = self._clean_stroke_mask(label_alpha)
+        iterations = getattr(self.cfg, "HANDWRITING_LABEL_DILATE_ITERATIONS", 0)
+        if iterations <= 0:
+            return label_alpha
+
+        kernel = np.ones((2, 2), np.uint8)
+        return cv2.dilate(label_alpha, kernel, iterations=iterations)

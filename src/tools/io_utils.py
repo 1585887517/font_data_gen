@@ -1,5 +1,6 @@
 import os
 import cv2
+import numpy as np
 
 from tools.logger import Logger
 
@@ -26,6 +27,10 @@ class IOUtils:
             cfg.OUTPUT_MASK,
             f"{base_name}{cfg.OUTPUT_MASK_EXT}"
         )
+        mask_vis_path = os.path.join(
+            getattr(cfg, "OUTPUT_MASK_VIS", cfg.OUTPUT_MASK),
+            f"{base_name}{cfg.OUTPUT_MASK_EXT}"
+        )
 
         # ==================================================
         # 🚀 save image
@@ -42,10 +47,28 @@ class IOUtils:
             [int(cv2.IMWRITE_PNG_COMPRESSION), 1]
         )
 
+        ok3 = True
+        if getattr(cfg, "SAVE_MASK_VIS", False):
+            os.makedirs(os.path.dirname(mask_vis_path), exist_ok=True)
+            ok3 = cv2.imwrite(
+                mask_vis_path,
+                IOUtils.colorize_mask(mask),
+                [int(cv2.IMWRITE_PNG_COMPRESSION), 1]
+            )
+
         # ==================================================
         # 🚀 logging
         # ==================================================
-        if ok1 and ok2:
+        if ok1 and ok2 and ok3:
             pass
         else:
             Logger.error(f"[save failed] {base_name}")
+
+
+    @staticmethod
+    def colorize_mask(mask):
+
+        vis = np.zeros((*mask.shape, 3), dtype=np.uint8)
+        vis[mask == 1] = (255, 180, 0)
+        vis[mask == 2] = (70, 70, 255)
+        return vis

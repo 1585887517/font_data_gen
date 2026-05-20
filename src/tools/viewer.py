@@ -10,13 +10,73 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QVBoxLayout,
-    QComboBox
+    QComboBox,
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem
 )
 
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import QPixmap, QImage, QPainter
 from PyQt5.QtCore import Qt
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+class ZoomableGraphicsView(QGraphicsView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        self.pixmap_item = QGraphicsPixmapItem()
+        self.scene.addItem(self.pixmap_item)
+
+        # 启用平滑缩放/渲染以保证放大后字迹清晰
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        # 启用鼠标左键拖拽平移
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+
+        # 设置缩放中心和调整中心都以鼠标光标为锚点
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+
+        # 隐藏滚动条让界面更清爽美观
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # 缩放比例跟踪
+        self.current_zoom = 1.0
+
+    def setPixmap(self, pixmap):
+        self.pixmap_item.setPixmap(pixmap)
+        self.scene.setSceneRect(self.pixmap_item.boundingRect())
+        
+        # 初始加载时自适应大小
+        self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+        self.current_zoom = self.transform().m11()
+
+    def wheelEvent(self, event):
+        zoom_in_factor = 1.15
+        zoom_out_factor = 1.0 / zoom_in_factor
+
+        if event.angleDelta().y() > 0:
+            scale_factor = zoom_in_factor
+        else:
+            scale_factor = zoom_out_factor
+
+        new_zoom = self.current_zoom * scale_factor
+
+        # 限制放大倍数范围，避免过小或过大
+        if 0.15 <= new_zoom <= 10.0:
+            self.scale(scale_factor, scale_factor)
+            self.current_zoom = new_zoom
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.pixmap_item.pixmap() and not self.pixmap_item.pixmap().isNull():
+            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+            self.current_zoom = self.transform().m11()
 
 
 class Viewer(QWidget):
@@ -59,12 +119,10 @@ class Viewer(QWidget):
         self.setWindowTitle("Dataset Viewer")
         self.resize(1400, 800)
 
-        self.img_label = QLabel()
-        self.mask_label = QLabel()
+        self.img_label = ZoomableGraphicsView()
+        self.mask_label = ZoomableGraphicsView()
         self.stats_label = QLabel()
 
-        self.img_label.setAlignment(Qt.AlignCenter)
-        self.mask_label.setAlignment(Qt.AlignCenter)
         self.stats_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.stats_label.setWordWrap(True)
 
@@ -165,7 +223,7 @@ class Viewer(QWidget):
     # ==================================================
     # cv2 -> Qt
     # ==================================================
-    def show_img(self, label, img):
+    def show_img(self, view, img):
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -181,13 +239,7 @@ class Viewer(QWidget):
 
         pix = QPixmap.fromImage(qimg)
 
-        pix = pix.scaled(
-            650,
-            700,
-            Qt.KeepAspectRatio
-        )
-
-        label.setPixmap(pix)
+        view.setPixmap(pix)
 
     # ==================================================
     # control

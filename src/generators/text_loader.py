@@ -16,7 +16,7 @@ class TextLoader:
         os.makedirs(self.cfg.TEXT_ROOT, exist_ok=True)
 
         for root, _, files in os.walk(self.cfg.TEXT_ROOT):
-            category = os.path.relpath(root, self.cfg.TEXT_ROOT)
+            category = os.path.relpath(root, self.cfg.TEXT_ROOT).lower()
             if category == ".":
                 category = "general"
             for name in sorted(files):

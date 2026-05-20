@@ -53,6 +53,7 @@ class Config:
 
     OUTPUT_IMG = os.path.join(OUTPUT_ROOT, "images")
     OUTPUT_MASK = os.path.join(OUTPUT_ROOT, "masks")
+    OUTPUT_MASK_VIS = os.path.join(OUTPUT_ROOT, "mask_vis")
 
     OUTPUT_DIR = os.path.join(
         OUTPUT_ROOT,
@@ -69,6 +70,7 @@ class Config:
 
     IAM_RGBA_DIR = os.path.join(HANDWRITING_ROOT, "iam_rgba")
     CASIA_RGBA_DIR = os.path.join(HANDWRITING_ROOT, "casia_rgba")
+    REBUILD_HANDWRITING_RGBA = os.getenv("REBUILD_HANDWRITING_RGBA", "0") == "1"
 
     # ==================================================
     # 🚀 fonts
@@ -98,11 +100,12 @@ class Config:
     OUTPUT_IMAGE_EXT = ".jpg"
     OUTPUT_MASK_EXT = ".png"
     IMAGE_JPEG_QUALITY = int(os.getenv("IMAGE_JPEG_QUALITY", "95"))
+    SAVE_MASK_VIS = os.getenv("SAVE_MASK_VIS", "1") == "1"
 
     # ==================================================
     # 🚀 dataset config
     # ==================================================
-    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "20"))
+    NUM_SAMPLES = 100
 
     TRAIN_RATIO = 0.7
     VAL_RATIO = 0.2
@@ -114,14 +117,26 @@ class Config:
     CLEAN_OUTPUT = True
 
     # 前景太稀会让 printed/handwriting 的 IoU 很不稳定
-    HANDWRITING_OVERLAYS_PER_IMAGE = (1, 3)
-    MIN_FOREGROUND_RATIO = 0.08
-    MIN_HANDWRITING_RATIO = 0.02
+    HANDWRITING_OVERLAYS_PER_IMAGE = (2, 4)
+    MIN_FOREGROUND_RATIO = 0.018
+    MIN_PRINTED_RATIO = 0.006
+    MIN_HANDWRITING_RATIO = 0.004
+    MAX_REBUILD_ATTEMPTS = 8
+    PRINTED_LABEL_ALPHA_THRESHOLD = 32
+    PRINTED_OCCUPIED_ALPHA_THRESHOLD = 20
+
+    # 手写体白底扣图与去噪。按背景亮度提取暗笔画，避免灰纸底变成整块 alpha。
+    HANDWRITING_MIN_STROKE_CONTRAST = 28
+    HANDWRITING_LABEL_DILATE_ITERATIONS = 0
+    HANDWRITING_MIN_COMPONENT_AREA = 10
+    HANDWRITING_MIN_COMPONENT_SIDE = 2
+    HANDWRITING_FEATHER_BLUR = 3
 
     # 版式不要过于模板化，否则模型会记住表格位置而不是文字外观
-    FORM_LAYOUT_PROB = 0.45
-    RECEIPT_LAYOUT_PROB = 0.20
-    FREE_LAYOUT_PROB = 0.35
+    HEADLINE_LAYOUT_PROB = 0.18
+    FORM_LAYOUT_PROB = 0.40
+    RECEIPT_LAYOUT_PROB = 0.18
+    FREE_LAYOUT_PROB = 0.24
 
     # 合成手机扫描纸质文档的真实性增强
     ENABLE_PAPER_TEXTURE = True
@@ -152,6 +167,7 @@ class Config:
             getattr(self, 'OUTPUT_ROOT', type(self).OUTPUT_ROOT),
             getattr(self, 'OUTPUT_IMG', type(self).OUTPUT_IMG),
             getattr(self, 'OUTPUT_MASK', type(self).OUTPUT_MASK),
+            getattr(self, 'OUTPUT_MASK_VIS', type(self).OUTPUT_MASK_VIS),
             getattr(self, 'OUTPUT_DIR', type(self).OUTPUT_DIR),
 
             self.HANDWRITING_ROOT,

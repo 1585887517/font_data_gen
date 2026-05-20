@@ -17,7 +17,10 @@ class DocumentGenerator:
 
         self.font_paths = self._discover_fonts()
         self.dpi = self._compute_dpi()
-        self.font_point_sizes = [9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40]
+        self.font_point_sizes = [
+            9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28,
+            32, 36, 40, 44, 48, 56, 64, 72
+        ]
         self.font_sizes = sorted({self._pt_to_px(pt) for pt in self.font_point_sizes})
         self.font_cache = {}
         for font_path in self.font_paths:
@@ -76,6 +79,17 @@ class DocumentGenerator:
             "深圳创新科技有限公司", "杭州供应链管理公司", "苏州制造有限公司"
         ]
 
+        self.headline_titles = [
+            ["人工智能", "应用指南"],
+            ["数据", "分析报告"],
+            ["项目管理", "实战手册"],
+            ["商业", "观察"],
+            ["城市", "更新计划"],
+            ["DOCUMENT", "CAPTURE"],
+            ["MODERN", "DESIGN"],
+            ["PROJECT", "REPORT"],
+        ]
+
 
     def _discover_fonts(self):
         font_paths = []
@@ -91,7 +105,7 @@ class DocumentGenerator:
         self.chinese_font_paths = []
         self.english_only_font_paths = []
         
-        cn_keywords = ["sc", "zh", "cn", "zcool", "zhimang", "mashan", "longcang", "serif", "hand"]
+        cn_keywords = ["sc", "zh", "cn", "zcool", "zhimang", "mashan", "longcang", "hei", "song", "kai", "fangsong"]
         for p in font_paths:
             name_lower = os.path.basename(p).lower()
             if any(k in name_lower for k in cn_keywords):
@@ -102,6 +116,13 @@ class DocumentGenerator:
         # 如果没有识别出中文字体，则全部视为中文字体以防万一
         if not self.chinese_font_paths:
             self.chinese_font_paths = font_paths
+
+        self.sans_font_paths = [
+            p for p in font_paths
+            if any(k in os.path.basename(p).lower() for k in ["sans", "hei", "gothic", "montserrat"])
+        ]
+        if not self.sans_font_paths:
+            self.sans_font_paths = self.chinese_font_paths
 
         return font_paths
 
@@ -132,6 +153,20 @@ class DocumentGenerator:
         else:
             font_path = random.choice(self.font_paths)
             
+        return self.font_cache[(font_path, nearest_size)]
+
+
+    def _headline_font(self, pt_size, text=None):
+        px_size = self._pt_to_px(pt_size)
+        nearest_size = min(self.font_sizes, key=lambda s: abs(s - px_size))
+
+        is_chinese = any('\u4e00' <= char <= '\u9fff' for char in text or "")
+        if is_chinese:
+            candidates = [p for p in self.sans_font_paths if p in self.chinese_font_paths]
+            font_path = random.choice(candidates or self.chinese_font_paths)
+        else:
+            font_path = random.choice(self.sans_font_paths or self.font_paths)
+
         return self.font_cache[(font_path, nearest_size)]
 
 
@@ -243,15 +278,19 @@ class DocumentGenerator:
 
         if self.cfg.DATASET_MODE != "handwriting_only":
             prob_total = (
-                self.cfg.FORM_LAYOUT_PROB
+                self.cfg.HEADLINE_LAYOUT_PROB
+                + self.cfg.FORM_LAYOUT_PROB
                 + self.cfg.RECEIPT_LAYOUT_PROB
                 + self.cfg.FREE_LAYOUT_PROB
             )
             layout_roll = random.random() * prob_total
-            form_prob = self.cfg.FORM_LAYOUT_PROB
+            headline_prob = self.cfg.HEADLINE_LAYOUT_PROB
+            form_prob = headline_prob + self.cfg.FORM_LAYOUT_PROB
             receipt_prob = self.cfg.RECEIPT_LAYOUT_PROB
 
-            if self.cfg.ENABLE_FORM_LAYOUT and layout_roll < form_prob:
+            if layout_roll < headline_prob:
+                self._draw_headline_layout(draw, mask)
+            elif self.cfg.ENABLE_FORM_LAYOUT and layout_roll < form_prob:
                 self._draw_form_layout(draw)
                 self._draw_structured_printed_text(draw, mask)
             elif layout_roll < form_prob + receipt_prob:
@@ -318,6 +357,116 @@ class DocumentGenerator:
                 column_x.pop(0)
             elif y > self.cfg.HEIGHT - 60:
                 break
+
+
+    def _draw_headline_layout(self, draw, mask):
+
+        W = self.cfg.WIDTH
+
+        title_parts = random.choice(self.headline_titles)
+        ink = random.randint(0, 35)
+        title_color = (ink, ink, ink)
+        accent_color = (random.randint(45, 95), random.randint(45, 95), random.randint(45, 95))
+
+        if random.random() < 0.55:
+            band_y = random.randint(65, 160)
+            band_h = random.randint(210, 360)
+            shade = random.randint(220, 242)
+            draw.rectangle([0, band_y, W, band_y + band_h], fill=(shade, shade, shade))
+
+        x = random.randint(55, 125)
+        y = random.randint(95, 210)
+
+        if random.random() < 0.65:
+            segments = [
+                (title_parts[0], random.choice([44, 48, 56, 64])),
+                (title_parts[1], random.choice([24, 28, 32, 36])),
+            ]
+            self._draw_mixed_headline_line(
+                draw,
+                mask,
+                segments,
+                (x, y),
+                title_color,
+                stroke_width=random.choice([2, 3])
+            )
+            y += random.randint(92, 128)
+        else:
+            main_font = self._headline_font(random.choice([48, 56, 64, 72]), text=title_parts[0])
+            self._draw_printed_text(
+                draw,
+                mask,
+                title_parts[0],
+                (x, y),
+                main_font,
+                title_color,
+                stroke_width=random.choice([2, 3])
+            )
+            y += random.randint(74, 102)
+            sub_font = self._headline_font(random.choice([28, 32, 36, 40]), text=title_parts[1])
+            self._draw_printed_text(
+                draw,
+                mask,
+                title_parts[1],
+                (x + random.randint(12, 72), y),
+                sub_font,
+                title_color,
+                stroke_width=random.choice([1, 2])
+            )
+            y += random.randint(58, 82)
+
+        subtitle = random.choice([
+            "2026 EDITION",
+            "实践与案例",
+            "精选版",
+            "A PRACTICAL GUIDE",
+            "方法、流程与工具",
+            "VOL. 02",
+        ])
+        subtitle_font = self._headline_font(random.choice([14, 16, 18, 20, 22]), text=subtitle)
+        self._draw_printed_text(
+            draw,
+            mask,
+            subtitle,
+            (x + random.randint(0, 55), y),
+            subtitle_font,
+            accent_color,
+            stroke_width=0
+        )
+
+        y += random.randint(70, 110)
+        for i in range(random.randint(3, 7)):
+            body = self._build_text(min_words=4, max_words=10, category="general")
+            body_font = self._headline_font(random.choice([10, 11, 12, 13, 14]), text=body)
+            self._draw_printed_text(
+                draw,
+                mask,
+                body,
+                (x + random.randint(0, 85), y + i * random.randint(26, 36)),
+                body_font,
+                (random.randint(35, 115),) * 3
+            )
+
+
+    def _draw_mixed_headline_line(self, draw, mask, segments, xy, color, stroke_width=1):
+
+        x, y = xy
+        baseline_shift = random.randint(4, 14)
+
+        for i, (text, pt_size) in enumerate(segments):
+            font = self._headline_font(pt_size, text=text)
+            seg_y = y + (baseline_shift if i > 0 else 0)
+            self._draw_printed_text(
+                draw,
+                mask,
+                text,
+                (x, seg_y),
+                font,
+                color,
+                stroke_width=stroke_width
+            )
+            bbox = draw.textbbox((x, seg_y), text, font=font, stroke_width=stroke_width)
+            x = bbox[2] + random.randint(12, 30)
 
 
     def _draw_structured_printed_text(self, draw, mask):
@@ -458,10 +607,10 @@ class DocumentGenerator:
             )
 
 
-    def _draw_printed_text(self, draw, mask, text, xy, font, color):
+    def _draw_printed_text(self, draw, mask, text, xy, font, color, stroke_width=0):
 
-        bbox = draw.textbbox(xy, text, font=font)
-        pad = 3
+        bbox = draw.textbbox(xy, text, font=font, stroke_width=stroke_width)
+        pad = 3 + stroke_width
         x0 = max(0, bbox[0] - pad)
         y0 = max(0, bbox[1] - pad)
         x1 = min(self.cfg.WIDTH, bbox[2] + pad)
@@ -482,12 +631,18 @@ class DocumentGenerator:
             (xy[0] - x0, xy[1] - y0),
             text,
             fill=255,
-            font=font
+            font=font,
+            stroke_width=stroke_width,
+            stroke_fill=255
         )
 
         text_mask = np.array(text_mask_img)
+        label_threshold = getattr(self.cfg, "PRINTED_LABEL_ALPHA_THRESHOLD", 96)
+        occupied_threshold = getattr(self.cfg, "PRINTED_OCCUPIED_ALPHA_THRESHOLD", 20)
         occupied_area = self._occupied[y0:y1, x0:x1]
-        overlap = occupied_area & (text_mask > 32)
+        label_region = text_mask >= label_threshold
+        occupied_region = text_mask >= occupied_threshold
+        overlap = occupied_area & occupied_region
 
         if np.any(overlap):
             return False
@@ -496,14 +651,16 @@ class DocumentGenerator:
             xy,
             text,
             fill=color,
-            font=font
+            font=font,
+            stroke_width=stroke_width,
+            stroke_fill=color
         )
 
         roi_mask = mask[y0:y1, x0:x1]
-        roi_mask[text_mask > 20] = 1
+        roi_mask[label_region] = 1
         
         roi_occupied = self._occupied[y0:y1, x0:x1]
-        roi_occupied[text_mask > 20] = 1
+        roi_occupied[occupied_region] = 1
 
         return True
 

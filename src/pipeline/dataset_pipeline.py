@@ -24,6 +24,53 @@ def init_worker(cfg, gen_cls, hw_cls, text_loader_cls=None):
     _HW = hw_cls(cfg)
 
 
+def class_ratios(mask):
+
+    total = max(1, mask.size)
+    return {
+        "foreground": float((mask > 0).sum()) / total,
+        "printed": float((mask == 1).sum()) / total,
+        "handwriting": float((mask == 2).sum()) / total,
+    }
+
+
+def overlay_handwriting_until_added(img, mask, hw, source, allow_overlap, max_attempts):
+
+    for _ in range(max_attempts):
+        before_count = int((mask == 2).sum())
+        next_img, next_mask = hw.overlay_by_source(
+            img,
+            mask,
+            source,
+            allow_overlap=allow_overlap
+        )
+        after_count = int((next_mask == 2).sum())
+
+        if after_count > before_count:
+            return next_img, next_mask, True
+
+        img, mask = next_img, next_mask
+
+    return img, mask, False
+
+
+def sample_meets_requirements(mask, task_mode, cfg):
+
+    ratios = class_ratios(mask)
+
+    if task_mode == "printed_only":
+        return ratios["printed"] >= cfg.MIN_PRINTED_RATIO
+
+    if task_mode == "handwriting_only":
+        return ratios["handwriting"] >= cfg.MIN_HANDWRITING_RATIO
+
+    return (
+        ratios["foreground"] >= cfg.MIN_FOREGROUND_RATIO
+        and ratios["printed"] >= cfg.MIN_PRINTED_RATIO
+        and ratios["handwriting"] >= cfg.MIN_HANDWRITING_RATIO
+    )
+
+
 # ==================================================
 # 🚀 worker（必须在全局，避免 multiprocessing pickle 问题）
 # ==================================================
@@ -44,8 +91,6 @@ def worker(task):
     original_mode = cfg.DATASET_MODE
     cfg.DATASET_MODE = task_mode
 
-    img, mask = gen.build()
-
     overlay_count = 0
     allow_overlap = False
     if task_mode == "both":
@@ -58,27 +103,30 @@ def worker(task):
     elif task_mode == "handwriting_only":
         overlay_count = random.randint(5, 10)
 
-    for _ in range(overlay_count):
-        img, mask = hw.overlay_by_source(img, mask, task["source"], allow_overlap=allow_overlap)
+    max_rebuild_attempts = getattr(cfg, "MAX_REBUILD_ATTEMPTS", 8)
+    max_overlay_attempts = max(4, overlay_count * 8)
+    extra_count = 0
+    while True:
+        img, mask = gen.build()
+
+        for _ in range(overlay_count):
+            img, mask, _ = overlay_handwriting_until_added(
+                img,
+                mask,
+                hw,
+                task["source"],
+                allow_overlap,
+                max_overlay_attempts
+            )
+
+        if sample_meets_requirements(mask, task_mode, cfg):
+            break
+
+        extra_count += 1
+        if extra_count >= max_rebuild_attempts:
+            break
 
     cfg.DATASET_MODE = original_mode
-
-    min_foreground = (
-        cfg.MIN_HANDWRITING_RATIO
-        if task_mode == "handwriting_only"
-        else cfg.MIN_FOREGROUND_RATIO
-    )
-
-    extra_count = 0
-    while (
-        (mask > 0).mean() < min_foreground
-        and extra_count < 6
-    ):
-        # 如果前景不够，重新生成文档并重新叠加手写，否则最终可能只剩下背景
-        img, mask = gen.build()
-        for _ in range(overlay_count):
-            img, mask = hw.overlay_by_source(img, mask, task["source"])
-        extra_count += 1
 
     r = random.random()
     if r < 0.35:
@@ -218,10 +266,12 @@ class DatasetPipeline:
         for path in [
             self.cfg.OUTPUT_IMG,
             self.cfg.OUTPUT_MASK,
+            getattr(self.cfg, "OUTPUT_MASK_VIS", ""),
             self.cfg.OUTPUT_DIR,
         ]:
-            if os.path.isdir(path):
+            if path and os.path.isdir(path):
                 shutil.rmtree(path)
-            os.makedirs(path, exist_ok=True)
+            if path:
+                os.makedirs(path, exist_ok=True)
 
         Logger.info("[pipeline] cleaned previous generated output")
