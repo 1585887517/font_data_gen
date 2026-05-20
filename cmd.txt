@@ -1,0 +1,8 @@
+python src/tools/pdf_to_seg_dataset.py \
+  --pdf pdf/超级整理术：工作效率是整理出来的.pdf \
+  --out output/pdf_seg \
+  --mode both_with_synthetic_handwriting \
+  --min-contrast 24
+  --max-component-area-ratio 0.015
+  --no-split \
+  --handwriting-overlays 1
