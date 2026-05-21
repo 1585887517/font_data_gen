@@ -406,7 +406,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Convert scanned book PDFs into PaddleSeg-style segmentation data."
     )
-    parser.add_argument("--pdf", nargs="+", required=True, help="Input scanned PDF file(s).")
+    parser.add_argument("--pdf", nargs="+", required=True, help="Input scanned PDF file(s) or directory(ies).")
     parser.add_argument("--out", required=True, help="Output root directory.")
     parser.add_argument(
         "--mode",
@@ -457,10 +457,25 @@ def main():
 
     sample_count = 0
     with tempfile.TemporaryDirectory(prefix="pdf_ocr_") as tmp_dir:
-        for pdf in args.pdf:
-            pdf_path = Path(pdf).expanduser().resolve()
-            pdf_slug = slugify(pdf_path)
+        # Gather all PDF files from input paths (files and directories)
+        pdf_paths = []
+        for p in args.pdf:
+            path = Path(p).expanduser().resolve()
+            if path.is_dir():
+                pdf_paths.extend(sorted(path.rglob("*.pdf")))
+            elif path.is_file() and path.suffix.lower() == ".pdf":
+                pdf_paths.append(path)
+                
+        # Deduplicate while preserving order
+        seen = set()
+        unique_pdf_paths = []
+        for p in pdf_paths:
+            if p not in seen:
+                seen.add(p)
+                unique_pdf_paths.append(p)
 
+        for pdf_idx, pdf_path in enumerate(unique_pdf_paths, start=1):
+            print(f"Processing PDF {pdf_idx}/{len(unique_pdf_paths)}: {pdf_path.name}")
             for page_number, image in iter_pdf_page_images(
                 pdf_path,
                 start_page=args.start_page,
@@ -468,7 +483,7 @@ def main():
             ):
                 image = resize_if_needed(image, args.max_side)
                 rgb = np.array(image)
-                name = f"{pdf_slug}_p{page_number:04d}"
+                name = f"pdf_{pdf_idx}_{page_number:04d}"
 
                 if args.mask_method == "ocr_guided":
                     polys = detect_text_polys(
