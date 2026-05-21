@@ -187,57 +187,78 @@ def odd_at_least(value, minimum=15):
     return value if value % 2 == 1 else value + 1
 
 
-def extract_roi_strokes(gray_roi, roi_text_mask, min_contrast):
-    if not np.any(roi_text_mask):
-        return np.zeros_like(gray_roi, dtype=np.uint8)
-
+def extract_single_polarity(gray_roi, roi_text_mask, min_contrast, polarity):
     h, w = gray_roi.shape
-    blur_size = odd_at_least(min(h, w) // 3, minimum=15)
-    background = cv2.GaussianBlur(gray_roi, (blur_size, blur_size), 0)
-    contrast = np.clip(
-        background.astype(np.int16) - gray_roi.astype(np.int16),
-        0,
-        255
-    ).astype(np.uint8)
+    morph_size = odd_at_least(min(h, w) // 2, minimum=15)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_size, morph_size))
+    
+    if polarity == "dark":
+        bg_base = cv2.dilate(gray_roi, kernel)
+    else:
+        bg_base = cv2.erode(gray_roi, kernel)
+
+    blur_size = odd_at_least(min(h, w) // 4, minimum=7)
+    background = cv2.GaussianBlur(bg_base, (blur_size, blur_size), 0)
+
+    if polarity == "light":
+        contrast = np.clip(gray_roi.astype(np.int16) - background.astype(np.int16), 0, 255).astype(np.uint8)
+    else:
+        contrast = np.clip(background.astype(np.int16) - gray_roi.astype(np.int16), 0, 255).astype(np.uint8)
 
     values = contrast[roi_text_mask > 0]
     values = values[values > 0]
     if values.size == 0:
         return np.zeros_like(gray_roi, dtype=np.uint8)
 
-    otsu_threshold, _ = cv2.threshold(
-        values.reshape(-1, 1),
-        0,
-        255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
+    otsu_threshold, _ = cv2.threshold(values.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     threshold = max(int(otsu_threshold), int(min_contrast))
     strokes = ((contrast >= threshold) & (roi_text_mask > 0)).astype(np.uint8) * 255
-
     return strokes
 
 
-def extract_printed_mask(
-    rgb,
-    min_contrast=18,
-    min_area=4,
-    max_area_ratio=0.04,
-):
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+def extract_roi_strokes(gray_roi, roi_text_mask, min_contrast):
+    """Extract stroke pixels using dual-polarity estimation and fallback heuristics."""
+    if not np.any(roi_text_mask):
+        return np.zeros_like(gray_roi, dtype=np.uint8)
+        
+    strokes_dark = extract_single_polarity(gray_roi, roi_text_mask, min_contrast, "dark")
+    strokes_light = extract_single_polarity(gray_roi, roi_text_mask, min_contrast, "light")
+    
+    mask_area = max(1, np.count_nonzero(roi_text_mask))
+    fill_dark = np.count_nonzero(strokes_dark) / mask_area
+    fill_light = np.count_nonzero(strokes_light) / mask_area
+    
+    # If one polarity yields a nearly solid block (>60% fill), it's likely extracting a background band.
+    # We should choose the opposite polarity.
+    if fill_dark > 0.60 and fill_light < 0.60:
+        return strokes_light
+    if fill_light > 0.60 and fill_dark < 0.60:
+        return strokes_dark
+        
+    # Fallback: check the boundary pixels of the bounding box
+    top = gray_roi[0, :]
+    bottom = gray_roi[-1, :]
+    left = gray_roi[:, 0]
+    right = gray_roi[:, -1]
+    boundary_pixels = np.concatenate([top, bottom, left, right])
+    if boundary_pixels.size == 0:
+        return strokes_dark
+        
+    boundary_median = np.median(boundary_pixels)
+    if boundary_median > 127:  # Bright local background implies dark text
+        return strokes_dark
+    else:                      # Dark local background implies light text
+        return strokes_light
 
-    h, w = gray.shape
-    blur_size = max(31, (min(h, w) // 18) | 1)
-    background = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
-    contrast = np.clip(
-        background.astype(np.int16) - gray.astype(np.int16),
-        0,
-        255
-    ).astype(np.uint8)
 
+def _threshold_single_direction(contrast, min_contrast):
+    """Apply Otsu + min_contrast threshold to a single-direction contrast map.
+
+    Returns a binary uint8 image (0 / 255) or *None* when no signal is found.
+    """
     positive = contrast[contrast > 0]
     if positive.size == 0:
-        return np.zeros_like(gray, dtype=np.uint8)
+        return None
 
     otsu_threshold, _ = cv2.threshold(
         contrast,
@@ -246,7 +267,40 @@ def extract_printed_mask(
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
     threshold = max(int(otsu_threshold), int(min_contrast))
-    binary = (contrast >= threshold).astype(np.uint8) * 255
+    return (contrast >= threshold).astype(np.uint8) * 255
+
+
+def extract_printed_mask(
+    rgb,
+    min_contrast=18,
+    min_area=4,
+    max_area_ratio=0.05,
+):
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    h, w = gray.shape
+    blur_size = max(31, (min(h, w) // 18) | 1)
+    background = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
+
+    diff = background.astype(np.int16) - gray.astype(np.int16)
+
+    # Dark-on-light direction (original)
+    contrast_dark = np.clip(diff, 0, 255).astype(np.uint8)
+    # Light-on-dark direction (new)
+    contrast_light = np.clip(-diff, 0, 255).astype(np.uint8)
+
+    bin_dark = _threshold_single_direction(contrast_dark, min_contrast)
+    bin_light = _threshold_single_direction(contrast_light, min_contrast)
+
+    if bin_dark is None and bin_light is None:
+        return np.zeros((h, w), dtype=np.uint8)
+
+    binary = np.zeros((h, w), dtype=np.uint8)
+    if bin_dark is not None:
+        binary = np.maximum(binary, bin_dark)
+    if bin_light is not None:
+        binary = np.maximum(binary, bin_light)
 
     binary = remove_small_components(
         binary,
@@ -262,7 +316,7 @@ def extract_printed_mask_ocr_guided(
     polys,
     min_contrast=14,
     min_area=3,
-    max_area_ratio=0.02,
+    max_area_ratio=0.05,
     expand_px=4,
 ):
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
@@ -279,7 +333,9 @@ def extract_printed_mask_ocr_guided(
             continue
 
         x, y, box_w, box_h = cv2.boundingRect(np.round(pts).astype(np.int32))
-        pad = max(2, int(expand_px))
+        # Use a generous padding so the border region is well represented
+        # for polarity detection and background estimation.
+        pad = max(4, int(expand_px) + 2)
         x0 = max(0, x - pad)
         y0 = max(0, y - pad)
         x1 = min(w, x + box_w + pad)
@@ -299,6 +355,8 @@ def extract_printed_mask_ocr_guided(
             roi_mask = cv2.dilate(roi_mask, kernel, iterations=1)
 
         gray_roi = gray[y0:y1, x0:x1]
+
+        # Extract strokes using the smart dual-polarity logic
         strokes = extract_roi_strokes(gray_roi, roi_mask, min_contrast)
         raw[y0:y1, x0:x1] = np.maximum(raw[y0:y1, x0:x1], strokes)
 
@@ -370,7 +428,7 @@ def parse_args():
     parser.add_argument("--ocr-expand-px", type=int, default=4)
     parser.add_argument("--min-contrast", type=int, default=18)
     parser.add_argument("--min-component-area", type=int, default=3)
-    parser.add_argument("--max-component-area-ratio", type=float, default=0.02)
+    parser.add_argument("--max-component-area-ratio", type=float, default=0.05)
     parser.add_argument("--handwriting-overlays", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-ratio", type=float, default=0.7)
