@@ -3,6 +3,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -29,10 +30,78 @@ def import_pypdf():
     return PdfReader
 
 
+def import_text_detection():
+    try:
+        from paddleocr import TextDetection
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "Missing dependency: paddleocr. Run `uv sync` first, then retry this tool."
+        ) from exc
+    return TextDetection
+
+
+def extract_dt_polys(result):
+    data = getattr(result, "json", None)
+
+    if data is None:
+        if isinstance(result, dict):
+            data = result
+        else:
+            raise RuntimeError(f"Cannot extract json from OCR result: {type(result)}")
+
+    if "res" in data:
+        data = data["res"]
+
+    polys = data.get("dt_polys", [])
+    clean_polys = []
+
+    for poly in polys:
+        pts = poly.tolist() if hasattr(poly, "tolist") else poly
+        if pts and len(pts) >= 3:
+            clean_polys.append([[float(x), float(y)] for x, y in pts])
+
+    return clean_polys
+
+
 def slugify(value):
     stem = Path(value).stem
     stem = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", stem)
     return stem.strip("_") or "pdf"
+
+
+def clamp_poly(poly, width, height):
+    out = []
+    for x, y in poly:
+        out.append([
+            float(np.clip(x, 0, width - 1)),
+            float(np.clip(y, 0, height - 1)),
+        ])
+    return out
+
+
+def make_ocr_model(model_name, device):
+    TextDetection = import_text_detection()
+    model_kwargs = {"model_name": model_name}
+    if device:
+        model_kwargs["device"] = device
+    return TextDetection(**model_kwargs)
+
+
+def detect_text_polys(rgb, model, batch_size, tmp_dir, image_name):
+    tmp_path = Path(tmp_dir) / f"{image_name}.jpg"
+    cv2.imwrite(
+        str(tmp_path),
+        cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR),
+        [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+    )
+
+    output = model.predict(str(tmp_path), batch_size=batch_size)
+    polys = []
+    for res in output:
+        polys.extend(extract_dt_polys(res))
+
+    h, w = rgb.shape[:2]
+    return [clamp_poly(poly, w, h) for poly in polys]
 
 
 def iter_pdf_page_images(pdf_path, start_page=1, end_page=None):
@@ -91,6 +160,63 @@ def remove_small_components(binary, min_area, max_area_ratio):
     return cleaned
 
 
+def polygon_mask(shape, polys, expand_px=3):
+    h, w = shape
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    for poly in polys:
+        pts = np.array(poly, dtype=np.float32)
+        if pts.shape[0] < 3:
+            continue
+        pts = np.round(pts).astype(np.int32)
+        cv2.fillPoly(mask, [pts], 255)
+
+    if expand_px > 0:
+        kernel_size = max(1, int(expand_px) * 2 + 1)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (kernel_size, kernel_size)
+        )
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+    return mask
+
+
+def odd_at_least(value, minimum=15):
+    value = max(minimum, int(value))
+    return value if value % 2 == 1 else value + 1
+
+
+def extract_roi_strokes(gray_roi, roi_text_mask, min_contrast):
+    if not np.any(roi_text_mask):
+        return np.zeros_like(gray_roi, dtype=np.uint8)
+
+    h, w = gray_roi.shape
+    blur_size = odd_at_least(min(h, w) // 3, minimum=15)
+    background = cv2.GaussianBlur(gray_roi, (blur_size, blur_size), 0)
+    contrast = np.clip(
+        background.astype(np.int16) - gray_roi.astype(np.int16),
+        0,
+        255
+    ).astype(np.uint8)
+
+    values = contrast[roi_text_mask > 0]
+    values = values[values > 0]
+    if values.size == 0:
+        return np.zeros_like(gray_roi, dtype=np.uint8)
+
+    otsu_threshold, _ = cv2.threshold(
+        values.reshape(-1, 1),
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    threshold = max(int(otsu_threshold), int(min_contrast))
+    strokes = ((contrast >= threshold) & (roi_text_mask > 0)).astype(np.uint8) * 255
+
+    return strokes
+
+
 def extract_printed_mask(
     rgb,
     min_contrast=18,
@@ -129,6 +255,61 @@ def extract_printed_mask(
     )
 
     return (binary > 0).astype(np.uint8)
+
+
+def extract_printed_mask_ocr_guided(
+    rgb,
+    polys,
+    min_contrast=14,
+    min_area=3,
+    max_area_ratio=0.02,
+    expand_px=4,
+):
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    h, w = gray.shape
+    text_region = polygon_mask((h, w), polys, expand_px=expand_px)
+    if not np.any(text_region):
+        return np.zeros((h, w), dtype=np.uint8)
+
+    raw = np.zeros((h, w), dtype=np.uint8)
+
+    for poly in polys:
+        pts = np.array(poly, dtype=np.float32)
+        if pts.shape[0] < 3:
+            continue
+
+        x, y, box_w, box_h = cv2.boundingRect(np.round(pts).astype(np.int32))
+        pad = max(2, int(expand_px))
+        x0 = max(0, x - pad)
+        y0 = max(0, y - pad)
+        x1 = min(w, x + box_w + pad)
+        y1 = min(h, y + box_h + pad)
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        roi_mask = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+        local_pts = np.round(pts - np.array([x0, y0], dtype=np.float32)).astype(np.int32)
+        cv2.fillPoly(roi_mask, [local_pts], 255)
+        if expand_px > 0:
+            kernel_size = max(1, int(expand_px) * 2 + 1)
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_RECT,
+                (kernel_size, kernel_size)
+            )
+            roi_mask = cv2.dilate(roi_mask, kernel, iterations=1)
+
+        gray_roi = gray[y0:y1, x0:x1]
+        strokes = extract_roi_strokes(gray_roi, roi_mask, min_contrast)
+        raw[y0:y1, x0:x1] = np.maximum(raw[y0:y1, x0:x1], strokes)
+
+    raw = remove_small_components(
+        raw,
+        min_area=min_area,
+        max_area_ratio=max_area_ratio
+    )
+    raw[text_region == 0] = 0
+
+    return (raw > 0).astype(np.uint8)
 
 
 def make_cfg(output_root, save_mask_vis=True):
@@ -177,9 +358,19 @@ def parse_args():
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--end-page", type=int, default=None)
     parser.add_argument("--max-side", type=int, default=1800)
+    parser.add_argument(
+        "--mask-method",
+        choices=["ocr_guided", "threshold"],
+        default="ocr_guided",
+        help="ocr_guided confines printed masks to PaddleOCR text detection regions.",
+    )
+    parser.add_argument("--ocr-model-name", default="PP-OCRv5_server_det")
+    parser.add_argument("--ocr-device", default=None, help='For example "cpu", "gpu", "gpu:0".')
+    parser.add_argument("--ocr-batch-size", type=int, default=1)
+    parser.add_argument("--ocr-expand-px", type=int, default=4)
     parser.add_argument("--min-contrast", type=int, default=18)
-    parser.add_argument("--min-component-area", type=int, default=4)
-    parser.add_argument("--max-component-area-ratio", type=float, default=0.04)
+    parser.add_argument("--min-component-area", type=int, default=3)
+    parser.add_argument("--max-component-area-ratio", type=float, default=0.02)
     parser.add_argument("--handwriting-overlays", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-ratio", type=float, default=0.7)
@@ -198,43 +389,67 @@ def main():
     output_root = Path(args.out).resolve()
     cfg = make_cfg(output_root, save_mask_vis=not args.no_mask_vis)
 
+    ocr_model = None
+    if args.mask_method == "ocr_guided":
+        ocr_model = make_ocr_model(args.ocr_model_name, args.ocr_device)
+
     handwriting_loader = None
     if args.mode == "both_with_synthetic_handwriting":
         handwriting_loader = HandwritingLoader(cfg)
 
     sample_count = 0
-    for pdf in args.pdf:
-        pdf_path = Path(pdf).expanduser().resolve()
-        pdf_slug = slugify(pdf_path)
+    with tempfile.TemporaryDirectory(prefix="pdf_ocr_") as tmp_dir:
+        for pdf in args.pdf:
+            pdf_path = Path(pdf).expanduser().resolve()
+            pdf_slug = slugify(pdf_path)
 
-        for page_number, image in iter_pdf_page_images(
-            pdf_path,
-            start_page=args.start_page,
-            end_page=args.end_page
-        ):
-            image = resize_if_needed(image, args.max_side)
-            rgb = np.array(image)
-            printed = extract_printed_mask(
-                rgb,
-                min_contrast=args.min_contrast,
-                min_area=args.min_component_area,
-                max_area_ratio=args.max_component_area_ratio,
-            )
-            mask = np.zeros(printed.shape, dtype=np.uint8)
-            mask[printed > 0] = 1
+            for page_number, image in iter_pdf_page_images(
+                pdf_path,
+                start_page=args.start_page,
+                end_page=args.end_page
+            ):
+                image = resize_if_needed(image, args.max_side)
+                rgb = np.array(image)
+                name = f"{pdf_slug}_p{page_number:04d}"
 
-            if handwriting_loader is not None:
-                rgb, mask = maybe_add_handwriting(
-                    rgb,
-                    mask,
-                    handwriting_loader,
-                    overlays=args.handwriting_overlays,
-                    rng=rng
-                )
+                if args.mask_method == "ocr_guided":
+                    polys = detect_text_polys(
+                        rgb,
+                        ocr_model,
+                        batch_size=args.ocr_batch_size,
+                        tmp_dir=tmp_dir,
+                        image_name=name
+                    )
+                    printed = extract_printed_mask_ocr_guided(
+                        rgb,
+                        polys,
+                        min_contrast=args.min_contrast,
+                        min_area=args.min_component_area,
+                        max_area_ratio=args.max_component_area_ratio,
+                        expand_px=args.ocr_expand_px,
+                    )
+                else:
+                    printed = extract_printed_mask(
+                        rgb,
+                        min_contrast=args.min_contrast,
+                        min_area=args.min_component_area,
+                        max_area_ratio=args.max_component_area_ratio,
+                    )
 
-            name = f"{pdf_slug}_p{page_number:04d}"
-            save_sample(rgb, mask, name, cfg)
-            sample_count += 1
+                mask = np.zeros(printed.shape, dtype=np.uint8)
+                mask[printed > 0] = 1
+
+                if handwriting_loader is not None:
+                    rgb, mask = maybe_add_handwriting(
+                        rgb,
+                        mask,
+                        handwriting_loader,
+                        overlays=args.handwriting_overlays,
+                        rng=rng
+                    )
+
+                save_sample(rgb, mask, name, cfg)
+                sample_count += 1
 
     if not args.no_split and sample_count > 0:
         split_dataset(
